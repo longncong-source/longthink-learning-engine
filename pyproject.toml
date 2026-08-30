@@ -1,0 +1,58 @@
+[project]
+name = "longthink-learning-engine"
+version = "1.0.0"
+description = "LongThink Learning Engine - Local Agent (First Brain) + Cloud Long-Term Memory (Second Brain)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "llama-index>=0.12.33",
+    "llama-index-embeddings-huggingface>=0.5.3",
+    "llama-index-llms-ollama>=0.5.4",
+    "llama-index-vector-stores-qdrant>=0.6.0",
+    "python-dotenv>=1.1.0",
+    "qdrant-client>=1.14.2",
+    "sentence-transformers>=4.1.0",
+    "docx>=0.2.5",
+    "pdfplumber>=0.3.0",
+    "openpyxl>=3.1.5",
+    "watchdog>=3.0.0",
+    "fastapi[standard]>=0.115.12",
+    "pydantic>=2.11.3",
+    "structlog>=25.3.0",
+]
+
+[project.optional-dependencies]
+data_ingest = [
+    "arxiv>=2.2.0",
+]
+
+api = [
+    "fastapi[standard]>=0.115.12",
+    "pydantic>=2.11.3",
+    "ollama>=0.4.8",
+]
+
+dev = [
+  "fastapi[standard]>=0.115.12",
+  "pydantic>=2.11.3",
+  "arxiv>=2.2.0",
+  "ollama>=0.4.8",
+]
+
+[tool.setuptools.packages]
+find = ["app"]
+
+[build-system]
+requires = ["uv"]
+build-backend = "uv.buildbackend"
+# ---------------------------------------------------------------------------
+# First/Second Brain tooling (does not affect the legacy RAG runtime deps)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".venv", "app", "data", "documents", "ollama"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF100", "C4"]
+ignore = ["E501", "SIM108", "SIM105", "SIM117", "B008"]

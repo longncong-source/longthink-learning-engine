@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Secrets & environments (never commit real credentials)
+.env
+.env.*
+!.env.example
+cloud/.env
+local/.env
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# First/Second Brain local data
+local_data/
+backups/
+data/*.sqlite3
+data/*.sqlite3-*
+
+# Legacy RAG stack heavy/runtime dirs (models, caches, registry keys)
+ollama/
+comfyui/
+mid_brain_data/
+mid_brain_network.db
+*.db-shm
+*.db-wal
+# Personal/project documents stay out of version control (privacy)
+documents/
+app/.cache/
+data/
+local_data/
+
+# OS
+.DS_Store
+Thumbs.db

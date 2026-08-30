@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LongThink Learning Engine — Human Knowledge Interface</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='90'%3E🧠%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+
+<!-- ══════════ API key modal ══════════ -->
+<div id="key-modal" class="modal-backdrop hidden">
+  <div class="modal">
+    <h2>🔐 Kết nối Second Brain API</h2>
+    <p>Nhập API key (<code>X-API-Key</code>). Key được lưu trong localStorage của trình duyệt.</p>
+    <input id="key-input" type="password" placeholder="dev-local-key" autocomplete="off" spellcheck="false" />
+    <div class="modal-actions">
+      <button id="key-save" class="btn primary">Kết nối</button>
+    </div>
+    <p id="key-error" class="error-text hidden">Sai API key hoặc API chưa chạy.</p>
+  </div>
+</div>
+
+<!-- ══════════ Top bar ══════════ -->
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-icon">🧠</span>
+    <div>
+      <div class="brand-title">LongThink Learning Engine</div>
+      <div class="brand-sub">Human Knowledge Interface ⟷ Mid Brain · Control Center</div>
+    </div>
+  </div>
+
+  <div class="bridge" id="bridge">
+    <div class="bridge-node local" id="node-first">
+      <span class="dot"></span>
+      <b>First Brain</b><small id="fb-llm">local · ollama</small>
+    </div>
+    <div class="bridge-arrows">
+      <div class="flow"><span class="arrow write"></span><small>store</small></div>
+      <div class="flow"><span class="arrow read"></span><small>retrieve</small></div>
+    </div>
+    <div class="bridge-node mid" id="node-mid">
+      <span class="dot"></span>
+      <b>Mid Brain</b><small id="mid-status">intelligence · init…</small>
+    </div>
+    <div class="bridge-arrows">
+      <div class="flow"><span class="arrow write"></span><small>reason</small></div>
+      <div class="flow"><span class="arrow read"></span><small>learn</small></div>
+    </div>
+    <div class="bridge-node cloud" id="node-second">
+      <span class="dot"></span>
+      <b>Second Brain</b><small id="sb-backend">api · sqlite</small>
+    </div>
+  </div>
+
+  <div class="status-pills">
+    <div class="pill" id="pill-lmstudio"><span class="dot gray"></span><span>LMStudio…</span></div>
+    <div class="pill" id="pill-mode"><span class="dot gray"></span><span>mode…</span></div>
+    <div class="pill" id="pill-api"><span class="dot gray"></span><span>API…</span></div>
+    <div class="pill" id="pill-embed"><span class="dot gray"></span><span>embed…</span></div>
+    <div class="pill" id="pill-mid"><span class="dot gray"></span><span>Mid…</span></div>
+    <div class="pill" id="pill-counts">— memories · — docs</div>
+    <button class="btn ghost small" id="btn-refresh" title="Tải lại toàn bộ (R)">⟳ <span id="refresh-in">–</span>s</button>
+  </div>
+</header>
+
+<!-- ══════════ Main layout ══════════ -->
+<main class="layout">
+
+  <!-- Left: filters -->
+  <aside class="sidebar left">
+    <!-- Status Widget — Brain Status Indicator + Online/Offline (spec 3.1-3.3) -->
+    <section class="side-section" id="status-widget">
+      <div class="widget-card">
+        <div class="widget-row header">
+          <span class="widget-label">Hệ thống</span>
+          <span id="widget-network" class="widget-val offline" title="Chế độ kết nối"><i class="wdot"></i> Offline · Local Only</span>
+        </div>
+        <div class="widget-brains">
+          <div class="widget-row" title="Tiếp nhận thô, phân loại, ghi nhanh — LMStudio/Ollama">
+            <span class="widget-label">⚡ First Brain</span>
+            <span id="widget-first" class="widget-val muted"><i class="sicon">○</i> Idle · Ready</span>
+          </div>
+          <div class="widget-row" title="Local LLM — LMStudio vistral / Ollama">
+            <span class="widget-label">🧠 LMStudio</span>
+            <span id="widget-lmstudio" class="widget-val muted"><i class="sicon">○</i> Kiểm tra…</span>
+          </div>
+          <div class="widget-row" title="Phân tích ngữ cảnh, định tuyến, quyết định gọi Second Brain hay LLM">
+            <span class="widget-label">🧩 Mid Brain</span>
+            <span id="widget-mid" class="widget-val muted"><i class="sicon">○</i> Idle · Ready</span>
+          </div>
+          <div class="widget-row" title="Kho tri thức dài hạn + LLM chuyên sâu">
+            <span class="widget-label">📚 Second Brain</span>
+            <span id="widget-second" class="widget-val muted"><i class="sicon">○</i> Idle · Ready</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="side-section">
+      <label class="side-label">Lọc theo tên</label>
+      <input id="filter-text" type="search" placeholder="gõ để làm mờ node…" spellcheck="false" />
+    </section>
+
+    <section class="side-section">
+      <label class="side-label">Loại thực thể</label>
+      <div class="chip-row" id="kind-toggles">
+        <button class="chip active" data-kind="project">◆ project</button>
+        <button class="chip active" data-kind="memory">● memory</button>
+        <button class="chip active" data-kind="document">■ document</button>
+      </div>
+    </section>
+
+    <section class="side-section">
+      <label class="side-label">Kiểu memory</label>
+      <div class="type-list" id="type-filters"><!-- render by JS --></div>
+    </section>
+
+    <section class="side-section">
+      <label class="side-label">Importance tối thiểu: <b id="min-imp-val">0.0</b></label>
+      <input id="min-importance" type="range" min="0" max="1" step="0.05" value="0" />
+    </section>
+
+    <section class="side-section stats-mini" id="stats-mini"><!-- render by JS --></section>
+
+    <section class="side-section">
+      <div class="btn-col">
+        <button class="btn ghost" id="btn-fit">⤢ Vừa khung (F)</button>
+        <button class="btn ghost" id="btn-reheat">🔥 Re-run physics</button>
+        <button class="btn primary" id="btn-reload-graph">↻ Reload graph</button>
+      </div>
+    </section>
+  </aside>
+
+  <!-- Center: graph -->
+  <section class="graph-wrap">
+    <canvas id="graph"></canvas>
+    <div class="hud" id="hud">0 nodes · 0 links · zoom 100%</div>
+    <div id="tooltip" class="tooltip hidden"></div>
+    <div id="empty-hint" class="empty-hint hidden">
+      <div>🕸️ Đồ thị trống</div>
+      <p>Thêm dữ liệu ở tab <b>Ghi memory</b> hoặc upload tài liệu qua CLI:<br>
+        <code>.\scripts\brain.ps1 doc upload file.pdf</code></p>
+    </div>
+  </section>
+
+  <!-- Right: detail -->
+  <aside class="sidebar right" id="detail-panel">
+    <div class="placeholder">
+      <div style="font-size:34px">👆</div>
+      <p>Bấm vào một node trên đồ thị để xem chi tiết,<br>kéo để di chuyển, lăn chuột để zoom.</p>
+    </div>
+    <div id="detail-body" class="hidden"></div>
+  </aside>
+</main>
+
+<!-- ══════════ Bottom dock ══════════ -->
+<footer class="dock">
+  <nav class="tabs">
+    <button class="tab active" data-tab="activity">📜 Hoạt động</button>
+    <button class="tab" data-tab="metrics">📊 Metrics</button>
+    <button class="tab" data-tab="write">✍️ Ghi memory</button>
+    <button class="tab" data-tab="search">🔎 Tìm kiếm</button>
+    <button class="tab" data-tab="projects">➕ Tạo dự án</button>
+    <button class="tab" data-tab="upload">📤 Upload</button>
+    <button class="tab" data-tab="comfy">🎨 Comfy</button>
+    <button class="tab" data-tab="code">🤖 Code</button>
+    <button class="tab" data-tab="lmstudio">🧠 LMStudio</button>
+    <button class="tab" data-tab="odc">◈ ODC Studio</button>
+    <span class="dock-status" id="dock-status"></span>
+  </nav>
+
+  <div class="tab-page" data-page="activity">
+    <table class="audit-table" id="audit-table">
+      <thead><tr><th>thời gian</th><th>sự kiện</th><th>method</th><th>path</th><th>status</th><th>ms</th><th>request_id</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="tab-page hidden" data-page="metrics">
+    <div class="metric-cards" id="metric-cards"><!-- render by JS --></div>
+  </div>
+
+  <div class="tab-page hidden" data-page="write">
+    <form id="write-form" class="write-form">
+      <div class="form-row">
+        <label>Project
+          <select id="wf-project"><option value="">— không gán —</option></select>
+        </label>
+        <label>Kiểu
+          <select id="wf-type">
+            <option value="semantic">semantic</option>
+            <option value="episodic">episodic</option>
+            <option value="procedural">procedural</option>
+            <option value="decision" selected>decision</option>
+            <option value="lesson">lesson</option>
+            <option value="task">task</option>
+            <option value="preference">preference</option>
+          </select>
+        </label>
+        <label>Importance <b id="wf-imp-val">0.5</b>
+          <input id="wf-importance" type="range" min="0" max="1" step="0.05" value="0.5" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Tiêu đề
+          <input id="wf-title" required maxlength="300" placeholder="VD: Quyết định chọn Postgres cho production" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Nội dung
+          <textarea id="wf-content" required maxlength="20000" rows="4"
+            placeholder="Nội dung chi tiết sẽ được redact secrets tự động trước khi lưu…"></textarea>
+        </label>
+      </div>
+      <div class="form-row actions">
+        <button type="submit" class="btn primary">💾 Lưu vào Second Brain</button>
+        <span id="write-result" class="write-result"></span>
+      </div>
+    </form>
+  </div>
+
+  <div class="tab-page hidden" data-page="upload">
+    <div class="upload-top">
+      <div class="top-block">
+        <label class="side-label">Chế độ nạp</label>
+        <div class="target-row" id="upload-mode">
+          <button class="chip active" data-mode="docs">📄 Tài liệu → RAG</button>
+          <button class="chip" data-mode="bulk">🧠 File → Memory</button>
+        </div>
+      </div>
+      <div class="top-block">
+        <label class="side-label">Đích upload</label>
+        <div class="target-row" id="target-row">
+          <button class="chip active" data-target="local">💻 Local · 127.0.0.1:8100</button>
+          <button class="chip" data-target="cloud">☁️ Cloud…</button>
+        </div>
+      </div>
+    </div>
+    <div id="cloud-config" class="cloud-config hidden">
+      <input id="cloud-url" type="url" placeholder="https://second-brain-cua-ban.fly.dev" spellcheck="false" />
+      <input id="cloud-key" type="password" placeholder="API key của cloud" autocomplete="off" />
+      <small class="muted-note">Cloud API cần cho phép CORS (mặc định API đã mở *, hoặc đặt CORS_ORIGINS=...).</small>
+    </div>
+
+    <!-- ═══ Pane A: tài liệu RAG ═══ -->
+    <div id="pane-docs">
+      <div class="upload-layout">
+
+        <div class="upload-left">
+          <div class="dropzone" id="dropzone">
+            <div style="font-size:30px">📄</div>
+            <b>Kéo thả tài liệu vào đây</b>
+            <span>hoặc bấm để chọn file — PDF · DOCX · MD · TXT (≤ 20 MB/file)</span>
+          </div>
+          <input id="file-input" type="file" multiple accept=".pdf,.docx,.md,.txt" class="hidden" />
+          <div id="file-list" class="file-list"></div>
+        </div>
+
+        <div class="upload-right">
+          <label>Project
+            <select id="up-project"><option value="">— không gán —</option></select>
+          </label>
+          <label>Tiêu đề (tuỳ chọn — bỏ trống dùng tên file)
+            <input id="up-title" maxlength="300" placeholder="VD: Báo cáo khảo sát hiện trường" />
+          </label>
+          <label>Nguồn (tuỳ chọn)
+            <input id="up-source" maxlength="500" placeholder="VD: email khách hàng / sổ tay nội bộ" />
+          </label>
+          <div class="progress hidden" id="up-progress"><i></i></div>
+          <div class="form-row actions" style="margin:0">
+            <button class="btn primary" id="btn-upload" disabled>🚀 Upload <span id="up-count"></span></button>
+            <button class="btn ghost" id="btn-clear-files">Xoá danh sách</button>
+          </div>
+          <div id="up-summary" class="write-result"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══ Pane B: file → memory hàng loạt ═══ -->
+    <div id="pane-bulk" class="hidden">
+      <div class="upload-layout">
+
+        <div class="upload-left">
+          <div class="dropzone" id="mi-dropzone">
+            <div style="font-size:30px">🧠</div>
+            <b>Kéo thả file dữ liệu vào đây</b>
+            <span>JSON · JSONL · CSV · MD · TXT — mỗi mục/đoạn sẽ thành 1 memory (≤ 1000 mục/file)</span>
+          </div>
+          <input id="mi-input" type="file" multiple accept=".json,.jsonl,.csv,.md,.markdown,.txt" class="hidden" />
+          <div id="mi-list" class="file-list"></div>
+        </div>
+
+        <div class="upload-right">
+          <label>Project
+            <select id="mi-project"><option value="">— không gán —</option></select>
+          </label>
+          <div class="form-row" style="margin:0">
+            <label style="flex:1">Kiểu mặc định
+              <select id="mi-type">
+                <option value="semantic" selected>semantic</option>
+                <option value="episodic">episodic</option>
+                <option value="procedural">procedural</option>
+                <option value="decision">decision</option>
+                <option value="lesson">lesson</option>
+                <option value="task">task</option>
+                <option value="preference">preference</option>
+              </select>
+            </label>
+            <label style="flex:1">Nguồn (tuỳ chọn)
+              <input id="mi-source" maxlength="500" placeholder="mặc định: file-import:<tên file>" />
+            </label>
+          </div>
+          <details class="format-help">
+            <summary>Định dạng file?</summary>
+            <div class="format-help-body">
+              <b>JSON / JSONL</b>: mảng object hoặc mỗi dòng một object<br>
+              <code>[{"title":"...","content":"...","type":"lesson","importance":0.8}]</code><br><br>
+              <b>CSV</b>: cần cột <code>title,content</code>; tuỳ chọn <code>type,importance,confidence</code><br><br>
+              <b>MD</b>: mỗi heading (<code>## Tựa đề</code>) thành 1 memory<br>
+              <b>TXT</b>: mỗi đoạn cách nhau bằng dòng trống thành 1 memory
+            </div>
+          </details>
+          <div class="progress hidden" id="mi-progress"><i></i></div>
+          <div class="form-row actions" style="margin:0">
+            <button class="btn primary" id="btn-import" disabled>🧠 Nạp vào Memory <span id="mi-count"></span></button>
+            <button class="btn ghost" id="btn-mi-clear">Xoá danh sách</button>
+          </div>
+          <div id="mi-summary" class="write-result"></div>
+          <small class="muted-note">Mục đích: nạp kiến thức/nhiệm vụ hàng loạt để model (agent, deep-learning pipeline) retrieve và tự thực thi sau này. Mọi nội dung vẫn qua redact secrets + dedupe.</small>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-page hidden" data-page="search">
+    <div class="search-bar">
+      <input id="search-input" placeholder="hybrid search (semantic + keyword + importance + recency)…" spellcheck="false" />
+      <select id="search-topk"><option>5</option><option selected>8</option><option>15</option><option>30</option></select>
+      <button class="btn primary" id="search-go">Tìm</button>
+    </div>
+    <div id="search-results" class="search-results"><em>Nhập từ khoá rồi bấm Tìm — kết quả có breakdown điểm số.</em></div>
+  </div>
+
+  <div class="tab-page hidden" data-page="projects">
+    <div class="projects-layout">
+      <form id="project-form" class="project-form">
+        <b style="font-size:13px">➕ Tạo dự án mới</b>
+        <div class="form-row" style="margin:6px 0 0">
+          <label style="flex:1">Tên dự án *
+            <input id="pf-name" required maxlength="200" placeholder="VD: LNG Project, Nghiên cứu AI…" />
+          </label>
+          <label style="flex:1.6">Mô tả
+            <input id="pf-desc" maxlength="2000" placeholder="Mục tiêu, phạm vi… (tuỳ chọn)" />
+          </label>
+          <button type="submit" class="btn primary" style="align-self:end">Tạo</button>
+        </div>
+        <div id="pf-result" class="write-result"></div>
+      </form>
+      <div id="project-grid" class="project-grid"></div>
+    </div>
+  </div>
+
+  <div class="tab-page hidden" data-page="comfy">
+    <div class="comfy-layout">
+      <div class="comfy-left">
+        <div class="comfy-header">
+          <b style="font-size:13px">🎨 ComfyUI — Tạo ảnh từ tri thức</b>
+          <span class="muted-note" id="comfy-health">kiểm tra...</span>
+        </div>
+        <label>Prompt (mô tả ảnh)
+          <textarea id="comfy-prompt" rows="3" maxlength="2000" placeholder="isometric moon base station, cyan glow, starfield, octane render, ultra detailed"></textarea>
+        </label>
+        <label>Negative (loại trừ)
+          <input id="comfy-negative" maxlength="500" placeholder="blurry, low quality, watermark" />
+        </label>
+        <div class="form-row" style="margin:0">
+          <label style="flex:1">Mẫu
+            <select id="comfy-workflow"><option value="workflows/moon_base.json" selected>moon_base — trạm mặt trăng</option><option value="">mặc định SD1.5</option></select>
+          </label>
+          <button class="btn primary" id="comfy-generate">🎨 Generate</button>
+        </div>
+        <div class="progress hidden" id="comfy-progress"><i></i></div>
+        <div id="comfy-status" class="write-result"></div>
+        <small class="muted-note">Ảnh sinh từ ComfyUI local <code>127.0.0.1:8188</code> qua <code>POST /v1/comfy/generate</code> (cần model trong <code>comfyui/models/checkpoints</code>). CPU ~2-3 phút/ảnh.</small>
+      </div>
+      <div class="comfy-right">
+        <div id="comfy-preview" class="comfy-preview">Chưa có ảnh — nhập prompt rồi bấm Generate</div>
+        <div class="form-row actions" style="margin-top:8px">
+          <button class="btn ghost small hidden" id="comfy-save-mem">💾 Lưu thành Memory</button>
+          <button class="btn ghost small hidden" id="comfy-download">⬇ Tải ảnh</button>
+          <span id="comfy-save-result" class="write-result"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tab-page hidden" data-page="code">
+    <div class="code-layout">
+      <div class="code-left">
+        <div class="code-header">
+          <b style="font-size:13px">🤖 OpenCode — Plugin trong LongThink</b>
+          <span class="muted-note" id="code-health-tab">ngầm :4096 …</span>
+        </div>
+        <div class="code-toolbar">
+          <button class="btn ghost small" id="code-start-tab">▶ Start :4096</button>
+          <button class="btn ghost small" id="code-open-tab">↗ Mở tab riêng</button>
+          <button class="btn ghost small" id="code-stop-tab">■ Stop</button>
+          <span id="code-status-tab" class="write-result"></span>
+        </div>
+        <div class="code-hint">Chat với codebase qua OpenCode chạy ngầm — không rời LongThink. Dùng floating chat (góc phải) để hỏi nhanh, tab này để làm việc full.</div>
+      </div>
+      <div class="code-right">
+        <div id="code-frame-wrap-tab" class="code-frame-wrap">
+          <div class="code-placeholder" id="code-placeholder-tab">
+            <div style="font-size:26px">🤖</div>
+            <b>OpenCode cần login</b>
+            <span>Bấm <b>Start :4096</b> hoặc chạy <code>D:\OPENCODE_WEB.bat</code></span>
+            <small class="muted-note">Username: <b>opencode</b> · Password: <code id="code-pass-tab">a481cb50...</code> (Basic Auth)</small>
+            <button class="btn primary small" id="code-launch-tab">▶ Start OpenCode</button>
+          </div>
+          <iframe id="code-iframe-tab" class="code-iframe hidden" title="OpenCode"></iframe>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tab-page hidden" data-page="lmstudio">
+    <div class="comfy-layout">
+      <div class="comfy-left">
+        <div class="comfy-header">
+          <b style="font-size:13px">🧠 LMStudio — Local LLM thông minh</b>
+          <span class="muted-note" id="lmstudio-health">kiểm tra...</span>
+        </div>
+        <div id="lmstudio-models" class="metric-cards" style="margin:6px 0"></div>
+        <label>Chat test (vistral-7b-chat)
+          <textarea id="lmstudio-prompt" rows="3" maxlength="2000" placeholder="Hỏi LMStudio... vd: Giải thích LongThink architecture"></textarea>
+        </label>
+        <div class="form-row" style="margin:0">
+          <button class="btn primary" id="lmstudio-send">💬 Gửi</button>
+          <button class="btn ghost" id="lmstudio-switch-ollama">↔ Ollama</button>
+          <button class="btn ghost" id="lmstudio-switch-lmstudio">↔ LMStudio</button>
+          <span id="lmstudio-status" class="write-result"></span>
+        </div>
+        <div id="lmstudio-response" class="detail-content hidden" style="max-height:240px"></div>
+        <small class="muted-note">LMStudio <code>127.0.0.1:1234/v1</code> — <code>vistral-7b-chat</code> (LLM) + <code>nomic-embed-text-v1.5</code> (768d → 384). Tự fallback Ollama/hash nếu offline. <code>.\scripts\lmstudio.ps1 status|test|switch</code></small>
+      </div>
+      <div class="comfy-right">
+        <div class="widget-card">
+          <div class="widget-row header"><span class="widget-label">Trạng thái</span><span id="lmstudio-pill" class="widget-val muted"><i class="sicon">○</i> Kiểm tra…</span></div>
+          <div id="lmstudio-detail" style="font-size:11.5px; line-height:1.6; color:var(--muted)">Đang kiểm tra LMStudio...</div>
+        </div>
+        <div class="widget-card" style="margin-top:10px">
+          <b style="font-size:12px">⚡ Tối ưu</b>
+          <small class="muted-note" style="display:block; margin-top:6px">LMStudio là First Brain LLM chính — nhanh, riêng tư, không cần internet. Embeddings 768d tự truncate về 384 để không vỡ DB cũ 1429 memories.</small>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tab-page hidden" data-page="odc">
+    <div class="code-layout" style="min-height:420px">
+      <div class="code-left">
+        <div class="code-header">
+          <b style="font-size:13px">◈ ODC Studio — Visual Orchestration</b>
+          <span class="muted-note" id="odc-health-tab">:3001 …</span>
+        </div>
+        <div class="code-toolbar">
+          <button class="btn ghost small" id="odc-start-tab">▶ Start :3001</button>
+          <button class="btn ghost small" id="odc-open-tab">↗ Mở tab riêng</button>
+          <button class="btn ghost small" id="odc-check-tab">⟡ Check</button>
+          <span id="odc-status-tab" class="write-result"></span>
+        </div>
+        <div class="code-hint">Kéo node RETRIEVE → THINK → STORE để tạo workflow, chạy ngay trên LongThink <code>:8100/v1/memory/search</code> + <code>mid-brain</code>. Proxy <code>:8100/odc/</code> không cần login.</div>
+        <div id="odc-log-tab" class="detail-content" style="max-height:160px; overflow:auto; margin-top:8px; font-size:11px; white-space:pre-wrap">Chưa chạy — bấm Check hoặc Run trong canvas.</div>
+      </div>
+      <div class="code-right">
+        <div id="odc-frame-wrap-tab" class="code-frame-wrap" style="min-height:400px">
+          <iframe id="odc-iframe-tab" class="code-iframe" title="ODC Studio" src="/odc/" style="border:none;width:100%;height:100%;min-height:400px"></iframe>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- ══════════ Floating Code Plugin ══════════ -->
+<button id="code-fab" class="code-fab" title="Chat với OpenCode (ngầm :4096)">
+  <span class="fab-icon">🤖</span>
+  <span class="fab-dot" id="code-fab-dot"></span>
+</button>
+
+<div id="code-plugin" class="code-plugin hidden">
+  <div class="code-plugin-header">
+    <div class="code-plugin-title">
+      <span class="code-plugin-icon">🤖</span>
+      <div>
+        <b>OpenCode</b>
+        <small id="code-health-mini">ngầm :4096 · kiểm tra…</small>
+      </div>
+    </div>
+    <div class="code-plugin-actions">
+      <button class="btn ghost small" id="code-popout" title="Mở tab riêng">↗</button>
+      <button class="btn ghost small" id="code-min" title="Thu nhỏ">—</button>
+      <button class="btn ghost small" id="code-close" title="Đóng">✕</button>
+    </div>
+  </div>
+  <div id="code-frame-wrap" class="code-frame-wrap mini">
+    <div class="code-placeholder" id="code-placeholder">
+      <div style="font-size:22px">🤖</div>
+      <b>OpenCode chưa chạy hoặc cần login</b>
+      <span>Chạy ngầm để chat với codebase</span>
+      <button class="btn primary small" id="code-launch">▶ Start :4096</button>
+      <small class="muted-note">Login: <b>opencode</b> / <code id="code-pass-mini">a481cb50...</code> — hoặc <code>D:\OPENCODE_WEB.bat</code></small>
+    </div>
+    <iframe id="code-iframe" class="code-iframe hidden" title="OpenCode Plugin"></iframe>
+  </div>
+  <div class="code-quick">
+    <input id="code-quick-input" type="text" placeholder="Hỏi OpenCode… (vd: giải thích file app.js, tạo API mới…)" spellcheck="false" />
+    <button class="btn primary small" id="code-quick-send">Gửi</button>
+  </div>
+  <div class="code-foot">
+    <span class="muted-note">💡 Plugin chạy ngầm <code>opencode web --port 4096</code> · Không rời LongThink</span>
+    <a href="/code/" target="_blank" class="code-link">Mở full ↗</a>
+  </div>
+</div>
+
+<div id="toast-zone"></div>
+
+<script src="/ui/graph.js?v=20260831j"></script>
+<script src="/ui/app.js?v=20260831j"></script>
+</body>
+</html>
+

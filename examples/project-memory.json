@@ -1,0 +1,33 @@
+{
+  "_comment": "Example memory payloads for POST /v1/memory (spec section 27 seeds)",
+  "project": {
+    "name": "LNG Project",
+    "description": "Long Nhôn LNG terminal project"
+  },
+  "memories": [
+    {
+      "type": "episodic",
+      "title": "Vendor A mechanical drawing delay",
+      "content": "Vendor A delayed mechanical drawing approval by 21 days.",
+      "importance": 0.75,
+      "confidence": 0.9,
+      "metadata": { "vendor": "A", "package": "mechanical" }
+    },
+    {
+      "type": "lesson",
+      "title": "Review before procurement",
+      "content": "Engineering document review must start before procurement.",
+      "importance": 0.7,
+      "confidence": 0.9,
+      "metadata": { "category": "engineering" }
+    },
+    {
+      "type": "decision",
+      "title": "Vendor drawings lead time rule",
+      "content": "We decided to require vendor drawings 14 days before procurement.",
+      "importance": 0.85,
+      "confidence": 0.9,
+      "metadata": { "rule_id": "VD-14" }
+    }
+  ]
+}

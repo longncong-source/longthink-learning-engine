@@ -1,0 +1,58 @@
+# ============================================================================
+# LongThink Learning Engine - MVP stack (5 components)
+#   First Brain (local) + Second Brain (cloud) - FastAPI + PostgreSQL/pgvector
+#   OpenCode + Ollama/LM Studio (external) + Docker Compose
+#
+# This file is SEPARATE from docker-compose.yml (legacy document-RAG stack)
+# so both stacks can coexist. Ports chosen to avoid conflicts:
+#   db  -> host 5433 (container 5432)
+#   api -> host 8100 (container 8000)
+#
+# Usage:
+#   docker compose -f docker-compose.brain.yml up -d --build
+# ============================================================================
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: fsb-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-second_brain}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-second_brain}
+      POSTGRES_DB: ${POSTGRES_DB:-second_brain}
+    ports:
+      - "5433:5432"
+    volumes:
+      - second_brain_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-second_brain} -d ${POSTGRES_DB:-second_brain}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: cloud/Dockerfile
+    container_name: fsb-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      MEMORY_DB_BACKEND: postgres
+      DATABASE_URL: postgresql://${POSTGRES_USER:-second_brain}:${POSTGRES_PASSWORD:-second_brain}@db:5432/${POSTGRES_DB:-second_brain}
+      MEMORY_API_KEYS: ${MEMORY_API_KEYS:-dev-local-key}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-hash}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434}
+    ports:
+      - "8100:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  second_brain_pgdata:
