@@ -168,7 +168,7 @@ code{font-family:"JetBrains Mono",Consolas,monospace; color:#a78bfa; font-size:1
 /* ONE VECTOR PLATFORM tree — kẻ bằng CSS để thẳng hàng tuyệt đối */
 .vp-tree{font-size:11.5px; display:flex; flex-direction:column}
 .vp-root{color:var(--accent,#8b5cf6); font-weight:700; margin-bottom:4px; font-size:11px}
-.vp-row{display:flex; align-items:center; gap:8px; padding:3px 4px 3px 20px; border-radius:6px; position:relative}
+.vp-row{display:flex; flex:1 1 100%; width:100%; align-items:center; gap:8px; padding:3px 4px 3px 20px; border-radius:6px; position:relative; font-size:12px}
 .vp-row:hover{background:rgba(139,92,246,.08)}
 .vp-row.vp-empty{opacity:.45}
 .vp-row.off .vp-label,.vp-row.off .vp-count{opacity:.35; text-decoration:line-through}
@@ -178,6 +178,7 @@ code{font-family:"JetBrains Mono",Consolas,monospace; color:#a78bfa; font-size:1
 /* nhánh ngang tới dot */
 .vp-row::before{content:""; position:absolute; left:9px; top:13px; width:9px; border-top:1px solid var(--dim); opacity:.55}
 .vp-row .dot{flex:0 0 auto}
+.vp-row .swatch{flex:0 0 auto; width:9px; height:9px; border-radius:50%}
 .vp-label{color:var(--text); font-weight:600; letter-spacing:.4px; white-space:nowrap}
 .vp-count{margin-left:auto; color:var(--text); font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap}
 .vp-branch{color:var(--dim); user-select:none}

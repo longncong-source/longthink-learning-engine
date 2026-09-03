@@ -8,8 +8,15 @@ const TYPE_COLORS = {
   document: "#fb923c", task: "#22d3ee", preference: "#e879f9",
 };
 const TYPE_ORDER = ["document","lesson","decision","episodic","semantic","task","procedural","preference"];
+// ONE VECTOR PLATFORM — mỗi domain 1 màu riêng trên graph 3D
+const DOMAIN_COLORS = {
+  project: "#c084fc", engineering: "#60a5fa", standard: "#2dd4bf", contract: "#fbbf24",
+  method: "#fb7185", site: "#a3e635", document: "#fb923c", lesson: "#f472b6",
+};
 window.FSB_COLORS = (n) => {
   if (n.kind === "project") return n._pcol || "#a78bfa";
+  const kt = n.knowledge_type;
+  if (kt && DOMAIN_COLORS[kt]) return DOMAIN_COLORS[kt];
   if (n.kind === "document") return "#fb923c";
   return TYPE_COLORS[n.type] || "#94a3b8";
 };
@@ -391,8 +398,9 @@ async function buildTypeFilterChips(nodes) {
       row.className = "vp-row" + (total === 0 ? " vp-empty" : "") + (off ? " off" : "");
       const detail = Object.entries(info.memory_types || {}).map(([k, v]) => `${k}:${v}`).join(" ") || "chưa có dữ liệu";
       row.title = `${g.label} — ${total} memories [${detail}] (click để lọc graph)`;
-      row.innerHTML = `<span class="dot ${total > 0 ? "green" : "amber"}"></span>`
-        + `<span class="vp-label">${g.label}</span><b class="vp-count">${total.toLocaleString("en-US")}</b>`;
+      const col = DOMAIN_COLORS[g.key] || "#94a3b8";
+      row.innerHTML = `<span class="swatch" style="background:${col};box-shadow:0 0 6px ${col}66"></span>`
+        + `<span class="vp-label">${g.label}</span><b class="vp-count" style="color:${col}">${total.toLocaleString("en-US")}</b>`;
       if (last) row.classList.add("vp-last");
       if (types.length && total > 0) {
         row.style.cursor = "pointer";

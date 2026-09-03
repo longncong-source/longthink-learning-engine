@@ -103,6 +103,7 @@ def _build_graph(project_id: UUID | None, max_memories: int) -> dict[str, Any]:
                 "filename": d.filename,
                 "mime_type": d.mime_type,
                 "pages": metadata.get("pages"),
+                "knowledge_type": metadata.get("knowledge_type"),
                 "project_id": d.project_id,
                 "created_at": _iso(d.created_at),
             }
@@ -121,6 +122,7 @@ def _build_graph(project_id: UUID | None, max_memories: int) -> dict[str, Any]:
                 "id": f"m:{m.id}",
                 "kind": "memory",
                 "type": m.type,
+                "knowledge_type": metadata.get("knowledge_type"),
                 "label": m.title,
                 "importance": m.importance,
                 "confidence": m.confidence,

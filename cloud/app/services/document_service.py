@@ -74,7 +74,10 @@ def ingest_document(
             title=display_title,
             source=source,
             mime_type=extraction.mime_type,
-            metadata={"pages": extraction.meta.get("pages")},
+            metadata={
+                "pages": extraction.meta.get("pages"),
+                **({"knowledge_type": knowledge_type} if knowledge_type else {}),
+            },
             project_id=project_id,
         )
     )
