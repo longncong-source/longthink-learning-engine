@@ -213,7 +213,7 @@ async function loadStatus() {
     document.getElementById("node-first").className = `bridge-node local ${fbOnline ? "online" : "offline"}`;
     renderStatsMini(s);
     fillProjectSelect().catch(() => {});
-    loadVectorPlatform().catch(() => {});
+    fetchPlatform().catch(() => {});
     // Mid + widget — widget reflects Network (true), not AI
     loadMidBrainStatus().then(mid=>{
       updateWidget({ isOnline: isNetworkOnline, emb, s, mid });
@@ -249,33 +249,29 @@ function fmtDuration(sec) {
   }
 const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-// ONE VECTOR PLATFORM — 8 logical knowledge domains + trạng thái
-async function loadVectorPlatform() {
-  const box = $("#vp-tree");
+// ONE VECTOR PLATFORM — 8 logical domains gộp vào mục Kiểu memory.
+// Mirror backend mapping (services/knowledge_domains.py): kt thắng type.
+const DOMAIN_GROUPS = [
+  { key: "project", label: "PROJECT", types: ["project"] },
+  { key: "engineering", label: "ENGINEERING", types: [] },
+  { key: "standard", label: "STANDARD", types: [] },
+  { key: "contract", label: "CONTRACT", types: [] },
+  { key: "method", label: "METHOD", types: ["procedural"] },
+  { key: "site", label: "SITE", types: [] },
+  { key: "document", label: "DOCUMENT", types: ["document"] },
+  { key: "lesson", label: "LESSON", types: ["lesson"] },
+];
+
+async function fetchPlatform() {
+  if (state.platform) return state.platform;
   try {
     const p = await api("/v1/memory/knowledge-domains");
-    $("#vp-backend").textContent = `${p.backend} · ${p.embedding_dimension}d`;
-    const rows = p.domains.map((d, i) => {
-      const last = i === p.domains.length - 1 && !p.unclassified.count;
-      const branch = last ? "└──" : "├──";
-      const dot = d.status === "active" ? "green" : "amber";
-      const types = Object.entries(d.memory_types || {}).map(([k, v]) => `${k}:${v}`).join(" ");
-      return `<div class="vp-row" title="${esc(types || "chưa có dữ liệu")}">`
-        + `<span class="vp-branch">${branch}</span>`
-        + `<span class="dot ${dot}"></span>`
-        + `<span class="vp-label">${esc(d.label)}</span>`
-        + `<b class="vp-count">${d.count.toLocaleString("en-US")}</b></div>`;
-    });
-    if (p.unclassified && p.unclassified.count) {
-      const types = Object.entries(p.unclassified.memory_types || {}).map(([k, v]) => `${k}:${v}`).join(" ");
-      rows.push(`<div class="vp-row" title="${esc(types)}"><span class="vp-branch">└──</span>`
-        + `<span class="dot amber"></span><span class="vp-label muted-note">UNCLASSIFIED</span>`
-        + `<b class="vp-count">${p.unclassified.count.toLocaleString("en-US")}</b></div>`);
-    }
-    box.innerHTML = `<div class="vp-root">ONE VECTOR PLATFORM · ${p.total_memories.toLocaleString("en-US")} memories</div>` + rows.join("");
-    box.title = `backend ${p.backend} · click domain không lọc — xem chi tiết ở tab search`;
+    state.platform = p;
+    const badge = $("#vp-backend");
+    if (badge) badge.textContent = `${p.backend} · ${p.embedding_dimension}d · ${p.total_memories.toLocaleString("en-US")}`;
+    return p;
   } catch (e) {
-    box.innerHTML = `<div class="muted-note">không tải được domains</div>`;
+    return null;
   }
 }
 
@@ -339,29 +335,76 @@ $$("#kind-toggles .chip").forEach((chip) => chip.addEventListener("click", () =>
   applyFilters();
 }));
 
-function buildTypeFilterChips(nodes) {
+function makeTypeChip(t, count) {
+  const color = TYPE_COLORS[t] || "#888";
+  const chip = document.createElement("div");
+  chip.className = "type-chip" + (state.filters.types.has(t) ? "" : " off");
+  chip.title = `${t} — ${count} memories (click để lọc)`;
+  chip.innerHTML = `<span class="swatch" style="background:${color};box-shadow:0 0 6px ${color}66"></span>${t} <small style="color:${color}">${count}</small>`;
+  chip.addEventListener("click", () => {
+    state.filters.types.has(t) ? state.filters.types.delete(t) : state.filters.types.add(t);
+    chip.classList.toggle("off");
+    applyFilters();
+  });
+  return chip;
+}
+
+function toggleDomainTypes(types) {
+  const allOn = types.every((t) => state.filters.types.has(t));
+  for (const t of types) {
+    allOn ? state.filters.types.delete(t) : state.filters.types.add(t);
+  }
+  buildTypeFilterChips(state.graph.nodes || []);
+  applyFilters();
+}
+
+async function buildTypeFilterChips(nodes) {
   const stats = state.graph.stats?.memories_by_type || {};
-  // Hiển thị đủ các loại theo thứ tự ảnh + thêm task (dù chưa có node cũng hiện để thấy màu)
   const present = new Set(nodes.filter((n) => n.kind === "memory").map((n) => n.type));
-  const types = TYPE_ORDER.filter((t) => present.has(t) || stats[t] !== undefined || t === "task");
-  // nếu chưa có gì (graph trống) vẫn hiện bộ mẫu theo ảnh
-  const toShow = types.length ? types : ["document","lesson","decision","episodic","semantic","task"];
   const wrap = $("#type-filters");
+  const platform = await fetchPlatform().catch(() => null);
+
+  const flatTypes = () => {
+    const types = TYPE_ORDER.filter((t) => present.has(t) || stats[t] !== undefined || t === "task");
+    return types.length ? types : ["document","lesson","decision","episodic","semantic","task"];
+  };
+
   wrap.innerHTML = "";
-  for (const t of toShow) {
-    const count = stats[t] ?? 0;
-    const color = TYPE_COLORS[t] || "#888";
-    const chip = document.createElement("div");
-    chip.className = "type-chip" + (state.filters.types.has(t) ? "" : " off");
-    chip.title = `${t} — ${count} memories`;
-    // dot + label + count như ảnh legend
-    chip.innerHTML = `<span class="swatch" style="background:${color};box-shadow:0 0 6px ${color}66"></span>${t} <small style="color:${color}">${count}</small>`;
-    chip.addEventListener("click", () => {
-      state.filters.types.has(t) ? state.filters.types.delete(t) : state.filters.types.add(t);
-      chip.classList.toggle("off");
-      applyFilters();
+  if (!platform) {
+    // offline fallback: chips phẳng như cũ
+    for (const t of flatTypes()) wrap.appendChild(makeTypeChip(t, stats[t] ?? 0));
+  } else {
+    const byKey = Object.fromEntries((platform.domains || []).map((d) => [d.key, d]));
+    const shown = new Set();
+    const groups = [...DOMAIN_GROUPS.map((g) => ({ ...g, extra: false })),
+      { key: "__unclassified", label: "UNCLASSIFIED", types: [], extra: true }];
+    groups.forEach((g, gi) => {
+      const info = g.extra ? platform.unclassified : byKey[g.key];
+      if (!info) return;
+      const counts = info.memory_types || {};
+      const types = [...new Set([...g.types, ...Object.keys(counts),
+        ...(!g.extra ? [] : TYPE_ORDER.filter((t) => stats[t] !== undefined || present.has(t)))])];
+      const visible = types.filter((t) => (counts[t] ?? 0) > 0 || g.types.includes(t)
+        || present.has(t) || stats[t] !== undefined || t === "task");
+      if (!visible.length) return; // domain trống hoàn toàn thì ẩn
+      visible.forEach((t) => shown.add(t));
+      const total = info.count ?? 0;
+      const last = gi === groups.length - 1;
+      const head = document.createElement("div");
+      head.className = "vp-row";
+      head.title = `${g.label} — ${total} memories (click bật/tắt cả nhóm)`;
+      head.innerHTML = `<span class="vp-branch">${last ? "└──" : "├──"}</span>`
+        + `<span class="dot ${total > 0 ? "green" : "amber"}"></span>`
+        + `<span class="vp-label">${g.label}</span><b class="vp-count">${total.toLocaleString("en-US")}</b>`;
+      head.style.cursor = "pointer";
+      head.addEventListener("click", () => toggleDomainTypes(visible));
+      wrap.appendChild(head);
+      for (const t of visible) wrap.appendChild(makeTypeChip(t, counts[t] ?? stats[t] ?? 0));
     });
-    wrap.appendChild(chip);
+    // types còn sót (có trong graph nhưng chưa map domain nào) → nhét vào cuối
+    for (const t of flatTypes()) {
+      if (!shown.has(t)) wrap.appendChild(makeTypeChip(t, stats[t] ?? 0));
+    }
   }
   // legend project — màu riêng từng project trên graph 3D
   const projRows = [];
