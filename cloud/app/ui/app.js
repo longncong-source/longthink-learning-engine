@@ -782,20 +782,24 @@ async function doFileSearch(silentEmpty = false) {
       groups.get(root).push(d);
     }
     const icon = (m) => (m || "").includes("pdf") ? "📕" : (m || "").includes("word") ? "📘" : (m || "").includes("markdown") || (m || "").includes("text") ? "📝" : "📄";
-    const fileCard = (d) => `
+    const fileCard = (d) => {
+      const segs = (d.source || "").split("/").filter(Boolean);
+      const folder = segs.length > 1 ? segs.slice(0, -1).join("/") : "";
+      return `
       <div class="sr-item" data-doc="${d.id}">
         <div class="sr-top">
           <span style="font-size:15px">${icon(d.mime_type)}</span>
-          <span class="sr-title">${esc(d.filename || d.title || d.id.slice(0, 8))}</span>
+          <span class="sr-title file-title" data-doc="${d.id}" title="Bấm để đọc toàn văn">${esc(d.filename || d.title || d.id.slice(0, 8))}</span>
         </div>
         ${d.source ? `<div class="sr-snippet" style="color:var(--amber)">📁 ${esc(d.source)}</div>` : ""}
         <div class="sr-snippet">${esc(d.title || "")}${d.title ? " · " : ""}${fmtDate(d.created_at)}</div>
         <div class="sr-actions">
-          <button class="btn primary small file-open" data-doc="${d.id}">📄 Mở file</button>
+          ${folder ? `<button class="btn primary small file-folder" data-folder="${esc(folder)}">📁 Mở thư mục</button>` : `<button class="btn primary small file-open" data-doc="${d.id}">📄 Mở file</button>`}
           <button class="btn ghost small file-graph" data-doc="${d.id}">🎯 Graph</button>
           <button class="btn ghost small file-vector" data-name="${esc(d.filename || d.title || "")}">🔎 Vector</button>
         </div>
       </div>`;
+    };
     box.innerHTML = [...groups.entries()].map(([root, arr]) => `
       <div class="file-group">
         <div class="file-group-head">📁 ${esc(root)} <small>${arr.length} file</small></div>
@@ -803,6 +807,18 @@ async function doFileSearch(silentEmpty = false) {
       </div>`).join("");
     $$("#file-search-results .file-open").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation(); openDocument(b.dataset.doc);
+    }));
+    // bấm tên file = đọc toàn văn
+    $$("#file-search-results .file-title").forEach((t) => {
+      t.style.cursor = "pointer";
+      t.addEventListener("click", (e) => { e.stopPropagation(); openDocument(t.dataset.doc); });
+    });
+    // Mở thư mục đã lưu: lọc luôn theo đường dẫn thư mục chứa file
+    $$("#file-search-results .file-folder").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      $("#file-search-input").value = b.dataset.folder;
+      doFileSearch();
+      toast(`📁 Đang xem thư mục: ${b.dataset.folder}`);
     }));
     $$("#file-search-results .file-graph").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation();
