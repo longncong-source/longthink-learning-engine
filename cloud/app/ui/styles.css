@@ -510,3 +510,8 @@ input[type="range"]{width:100%; accent-color:var(--accent)}
 .code-right{display:flex; flex-direction:column; min-height:0}
 .code-right .code-frame-wrap{flex:1; min-height:300px; border-radius:12px; border:1px solid var(--border); overflow:hidden}
 @media(max-width:900px){.code-layout{grid-template-columns:1fr} .code-plugin{width:96vw; right:2vw; height:70vh} .code-fab{right:12px; bottom:12px}}
+
+.sr-actions{margin-top:8px;display:flex;gap:6px}
+.doc-chunk{padding:8px 10px;border-left:2px solid var(--border);margin:8px 0;background:rgba(255,255,255,.02);border-radius:0 8px 8px 0}
+.doc-chunk-head{font-size:10px;color:var(--muted);margin-bottom:4px;letter-spacing:.06em}
+

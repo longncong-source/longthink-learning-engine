@@ -440,11 +440,16 @@ function renderDetail(node) {
   html += `<div class="detail-actions">
     <button class="btn ghost small" id="d-focus">🎯 Focus</button>
     <button class="btn ghost small" id="d-similar">🔎 Tìm tương tự</button>
+    ${node.kind === "document" ? `<button class="btn primary small" id="d-open">📄 Mở file</button>` : ""}
     ${node.kind === "memory" ? `<button class="btn danger small" id="d-delete">🗑 Xoá</button>` : ""}
   </div>`;
 
   body.innerHTML = html;
   $("#d-focus")?.addEventListener("click", () => engine.focusNode(node.id));
+  $("#d-open")?.addEventListener("click", () => {
+    const docId = (node.id || "").startsWith("d:") ? node.id.slice(2) : (node.document_id || null);
+    if (docId) openDocument(docId); else toast("Node này không gắn file gốc", true);
+  });
   $("#d-similar")?.addEventListener("click", () => {
     activateTab("search");
     $("#search-input").value = node.label;
@@ -463,6 +468,75 @@ function renderDetail(node) {
 }
 
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleString("vi-VN", { hour12: false }) : "-");
+
+/* ─────────── document viewer (click → truy xuất file gốc) ─────────── */
+let currentDocId = null;
+async function openDocument(docId) {
+  currentDocId = docId;
+  const modal = $("#doc-modal");
+  modal.classList.remove("hidden");
+  $("#doc-title").textContent = "📄 Đang tải file…";
+  $("#doc-meta").textContent = "";
+  $("#doc-body").textContent = "⏳ đang truy xuất nội dung gốc…";
+  $("#doc-status").textContent = "";
+  $("#doc-find").value = "";
+  try {
+    const data = await api(`/v1/documents/${docId}/content?max_chunks=500`);
+    const d = data.document;
+    $("#doc-title").textContent = `📄 ${d.filename || d.title || docId.slice(0, 8)}`;
+    const parts = [
+      d.source ? `cây thư mục: ${d.source}` : null,
+      d.mime_type || null,
+      d.title ? `tiêu đề: ${d.title}` : null,
+      `${data.chunk_count} đoạn`,
+      d.created_at ? `nạp: ${fmtDate(d.created_at)}` : null,
+    ].filter(Boolean);
+    $("#doc-meta").textContent = parts.join(" · ");
+    $("#doc-body").innerHTML = data.chunks.map((c, i) => {
+      const page = c.metadata?.page ? ` — trang ${c.metadata.page}` : "";
+      return `<div class="doc-chunk" data-i="${i}"><div class="doc-chunk-head">§${c.chunk_index + 1}${page}</div>${esc(c.content)}</div>`;
+    }).join("") || "<em>File trống.</em>";
+    $("#doc-status").textContent = `✅ ${data.chunk_count} đoạn · bấm 🎯 để xem node trên graph 3D`;
+    $("#doc-status").className = "write-result ok";
+  } catch (e) {
+    $("#doc-title").textContent = "📄 Không mở được file";
+    $("#doc-body").textContent = "";
+    $("#doc-status").textContent = "❌ " + e.message;
+    $("#doc-status").className = "write-result err";
+  }
+}
+$("#doc-close")?.addEventListener("click", () => $("#doc-modal")?.classList.add("hidden"));
+$("#doc-modal")?.addEventListener("click", (e) => {
+  if (e.target.id === "doc-modal") $("#doc-modal").classList.add("hidden");
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") $("#doc-modal")?.classList.add("hidden");
+});
+$("#doc-focus-graph")?.addEventListener("click", () => {
+  if (!currentDocId) return;
+  $("#doc-modal")?.classList.add("hidden");
+  const node = engine.nodeById.get(`d:${currentDocId}`);
+  if (node) {
+    engine.focusNode(`d:${currentDocId}`, Math.max(engine.scale, 1.25));
+    engine.selected = node; renderDetail(node); engine._dirty = true;
+  } else {
+    toast("Node file chưa có trên graph — Reload graph để thấy", true);
+  }
+});
+$("#doc-find")?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) return;
+  const chunks = $$("#doc-body .doc-chunk");
+  const hit = chunks.find((el) => el.textContent.toLowerCase().includes(q));
+  if (hit) {
+    hit.scrollIntoView({ block: "center" });
+    hit.style.background = "rgba(251,191,36,0.15)";
+    setTimeout(() => (hit.style.background = ""), 1600);
+  } else {
+    toast("Không thấy trong file", true);
+  }
+});
 
 /* ─────────── tabs ─────────── */
 function activateTab(name) {
@@ -612,9 +686,12 @@ async function doSearch() {
     setWidgetState("second","success","Retrieved ✓");
     setTimeout(()=> setWidgetState("mid","idle","Idle · Ready"), 800);
     if (!data.results.length) { box.innerHTML = "<em>Không có kết quả.</em>"; return; }
+    // giữ kết quả để nút Mở file dùng lại metadata.document_id
+    window._lastSearch = data.results;
     box.innerHTML = data.results.map((r, i) => {
       const c = TYPE_COLORS[r.type] || "#888";
       const bar = (v, max = 1) => `<div class="bar"><i style="width:${Math.min(100, (v / max) * 100)}%"></i></div>`;
+      const docId = r.metadata?.document_id || null;
       return `<div class="sr-item" data-id="m:${r.id}" data-i="${i}">
         <div class="sr-top">
           <span class="swatch" style="width:9px;height:9px;border-radius:50%;background:${c}"></span>
@@ -628,6 +705,7 @@ async function doSearch() {
           <div class="sb">imp${bar(r.scores.importance)}</div>
           <div class="sb">rec${bar(r.scores.recency)}</div>
         </div>
+        ${docId ? `<div class="sr-actions"><button class="btn ghost small sr-open" data-doc="${docId}">📄 Mở file gốc</button></div>` : ""}
       </div>`;
     }).join("");
     $$(".sr-item").forEach((el) => el.addEventListener("click", () => {
@@ -636,6 +714,10 @@ async function doSearch() {
       engine.focusNode(id, Math.max(engine.scale, 1.25));
       const node = engine.nodeById.get(id);
       if (node) { engine.selected = node; renderDetail(node); engine._dirty = true; }
+    }));
+    $$(".sr-open").forEach((btn) => btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openDocument(btn.dataset.doc);
     }));
   } catch (e) {
     box.innerHTML = `<em style="color:var(--red)">Lỗi: ${esc(e.message)}</em>`;

@@ -540,6 +540,24 @@ class SqliteRepository(BaseRepository):
             self._conn.commit()
         return record
 
+    def list_document_chunks(self, document_id: str, limit: int = 500) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, chunk_index, content, token_count, metadata FROM document_chunks "
+                "WHERE document_id=? ORDER BY chunk_index ASC LIMIT ?",
+                (document_id, max(1, min(int(limit), 2000))),
+            ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "chunk_index": r["chunk_index"],
+                "content": r["content"],
+                "token_count": r["token_count"],
+                "metadata": self._load_meta(r["metadata"]),
+            }
+            for r in rows
+        ]
+
     def count_documents(self) -> int:
         with self._lock:
             row = self._conn.execute("SELECT COUNT(*) AS c FROM documents").fetchone()

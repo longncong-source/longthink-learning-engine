@@ -163,6 +163,20 @@ class DocumentIngestResponse(BaseModel):
     chunks_indexed: int
 
 
+class DocumentChunkOut(BaseModel):
+    id: UUID
+    chunk_index: int
+    content: str
+    token_count: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentContentResponse(BaseModel):
+    document: DocumentOut
+    chunks: list[DocumentChunkOut]
+    chunk_count: int
+
+
 class FolderUploadItem(BaseModel):
     filename: str
     path: str = Field(description="Relative path inside the uploaded folder tree")

@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from cloud.app.db import get_repository
 from cloud.app.errors import DomainError, NotFoundError, PayloadTooLargeError, ValidationError
 from cloud.app.schemas import (
+    DocumentChunkOut,
+    DocumentContentResponse,
     DocumentIngestResponse,
     DocumentOut,
     FolderUploadItem,
@@ -23,6 +25,7 @@ from cloud.app.security import require_api_key
 from cloud.app.services.document_service import (
     delete_document,
     document_to_dict,
+    get_document_content,
     ingest_document,
 )
 
@@ -135,6 +138,19 @@ def list_documents(
         project_id=str(project_id) if project_id else None,
     )
     return [DocumentOut(**document_to_dict(r)) for r in rows]
+
+
+@router.get("/{document_id}/content", response_model=DocumentContentResponse)
+def get_document_content_by_id(
+    document_id: UUID, max_chunks: int = 500, _api_key: str = Depends(require_api_key)
+) -> DocumentContentResponse:
+    """Truy xuất file: metadata + toàn bộ chunks theo thứ tự để đọc/xem lại."""
+    result = get_document_content(str(document_id), max_chunks=max_chunks)
+    return DocumentContentResponse(
+        document=DocumentOut(**result["document"]),
+        chunks=[DocumentChunkOut(**c) for c in result["chunks"]],
+        chunk_count=result["chunk_count"],
+    )
 
 
 @router.get("/{document_id}", response_model=DocumentOut)

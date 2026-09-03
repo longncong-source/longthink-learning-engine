@@ -538,6 +538,31 @@ class PostgresRepository(BaseRepository):
         record.id = str(row["id"])
         return record
 
+    def list_document_chunks(self, document_id: str, limit: int = 500) -> list[dict]:
+        rows = self._fetchall(
+            "SELECT id, chunk_index, content, token_count, metadata FROM document_chunks "
+            "WHERE document_id=%(d)s::uuid ORDER BY chunk_index ASC LIMIT %(limit)s",
+            {"d": document_id, "limit": max(1, min(int(limit), 2000))},
+        )
+        out = []
+        for r in rows:
+            meta = r.get("metadata") or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            out.append(
+                {
+                    "id": str(r.get("id")),
+                    "chunk_index": r.get("chunk_index"),
+                    "content": r.get("content"),
+                    "token_count": r.get("token_count"),
+                    "metadata": meta,
+                }
+            )
+        return out
+
     def count_documents(self) -> int:
         row = self._fetchone("SELECT COUNT(*) AS c FROM documents", {})
         return int((row or {}).get("c") or 0)

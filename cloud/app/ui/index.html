@@ -22,6 +22,21 @@
   </div>
 </div>
 
+<!-- ══════════ Document viewer modal (truy xuất file) ══════════ -->
+<div id="doc-modal" class="modal-backdrop hidden">
+  <div class="modal" style="max-width:760px;width:92vw">
+    <h2 id="doc-title">📄 File</h2>
+    <div id="doc-meta" class="muted-note" style="margin:4px 0 8px"></div>
+    <div class="form-row" style="margin:0 0 8px">
+      <input id="doc-find" placeholder="Tìm trong file… (Enter)" spellcheck="false" style="flex:1" />
+      <button class="btn ghost small" id="doc-focus-graph">🎯 Xem trên graph</button>
+      <button class="btn ghost small" id="doc-close">✕ Đóng</button>
+    </div>
+    <div id="doc-body" class="detail-content" style="max-height:56vh;overflow:auto;white-space:pre-wrap"></div>
+    <div id="doc-status" class="write-result"></div>
+  </div>
+</div>
+
 <!-- ══════════ Top bar ══════════ -->
 <header class="topbar">
   <div class="brand">
@@ -562,8 +577,8 @@
 
 <div id="toast-zone"></div>
 
-<script src="/ui/graph.js?v=20260831q"></script>
-<script src="/ui/app.js?v=20260831q"></script>
+<script src="/ui/graph.js?v=20260831r"></script>
+<script src="/ui/app.js?v=20260831r"></script>
 </body>
 </html>
 

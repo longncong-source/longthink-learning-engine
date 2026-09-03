@@ -123,6 +123,25 @@ def ingest_document(
     return {"document": document_to_dict(document), "chunks_indexed": chunks_indexed}
 
 
+def get_document_content(
+    document_id: str,
+    *,
+    max_chunks: int = 500,
+    repo: BaseRepository | None = None,
+) -> dict:
+    """Reconstruct a document for viewing: metadata + ordered chunks."""
+    repository = repo or get_repository()
+    record = repository.get_document(document_id)
+    if record is None:
+        raise NotFoundError(f"Document {document_id} not found")
+    chunks = repository.list_document_chunks(document_id, limit=max_chunks)
+    return {
+        "document": document_to_dict(record),
+        "chunks": chunks,
+        "chunk_count": len(chunks),
+    }
+
+
 def delete_document(
     document_id: str,
     *,

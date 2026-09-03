@@ -131,6 +131,20 @@ class TestListAndGet:
         fetched = client.get(f"/v1/documents/{created['id']}", headers=AUTH_HEADERS)
         assert fetched.status_code == 200
 
+    def test_content_reconstructs_file(self, client):  # type: ignore[no-untyped-def]
+        created = _upload(client).json()["document"]
+        resp = client.get(f"/v1/documents/{created['id']}/content", headers=AUTH_HEADERS)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["document"]["id"] == created["id"]
+        assert body["chunk_count"] >= 1
+        full = "\n".join(c["content"] for c in body["chunks"])
+        assert "vendor A drawings" in full
+
+    def test_content_404(self, client):  # type: ignore[no-untyped-def]
+        resp = client.get(f"/v1/documents/{uuid.uuid4()}/content", headers=AUTH_HEADERS)
+        assert resp.status_code == 404
+
 
 class TestUploadFolder:
     def _folder_post(self, client, files_data, paths, **form):  # type: ignore[no-untyped-def]
