@@ -480,7 +480,7 @@ class PostgresRepository(BaseRepository):
             """
             SELECT * FROM documents
             WHERE (%(project_id)s::uuid IS NULL OR project_id=%(project_id)s::uuid)
-              AND (%(q)s IS NULL OR filename ILIKE %(like)s OR COALESCE(title,'') ILIKE %(like)s
+              AND (%(q)s::text IS NULL OR filename ILIKE %(like)s OR COALESCE(title,'') ILIKE %(like)s
                    OR COALESCE(source,'') ILIKE %(like)s)
             ORDER BY created_at DESC LIMIT %(limit)s
             """,

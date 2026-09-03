@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     documents_importance: float = 0.55
     documents_confidence: float = 0.8
 
+    # Folder watcher: incremental auto-index (VECTOR spec sections 18-19)
+    # Poll-based (no extra deps); size+mtime fast path, sha256 on change.
+    watch_poll_seconds: int = 60
+    watch_max_mb: int = 200
+
     # Mid Brain (Third Brain - Intelligence Layer)
     mid_brain_first_brain_url: str = "http://127.0.0.1:8100"
     mid_brain_second_brain_url: str = "http://127.0.0.1:8100"

@@ -238,3 +238,30 @@ class ObsidianVaultSyncResponse(BaseModel):
     skipped: int
     errors: int
     items: list[ObsidianVaultSyncItem]
+
+
+class WatchRegisterRequest(BaseModel):
+    path: str = Field(..., description="Absolute path to folder to watch")
+    project_id: UUID | None = None
+
+
+class WatchedFolder(BaseModel):
+    path: str
+    project_id: str | None = None
+
+
+class WatchStatusResponse(BaseModel):
+    running: bool
+    poll_seconds: int
+    folders: list[WatchedFolder]
+    last_scan: dict | None = None
+
+
+class WatchScanResponse(BaseModel):
+    folders: int = 0
+    new: int = 0
+    modified: int = 0
+    deleted: int = 0
+    unchanged: int = 0
+    skipped: int = 0
+    errors: list[str] = []

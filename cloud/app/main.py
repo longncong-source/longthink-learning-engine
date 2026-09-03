@@ -155,7 +155,22 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     except DomainError as exc:
         # Degraded start: /health still answers; writes/searches return 503 meaningfully.
         logger.warning("storage unavailable at startup: %s", exc.message)
+    try:
+        from cloud.app.services import watcher as _watcher
+
+        if _watcher.ensure_started(settings):
+            logger.info(
+                "folder watcher started (%ss poll)", settings.watch_poll_seconds
+            )
+    except Exception as exc:  # noqa: BLE001 - watcher must never block startup
+        logger.warning("folder watcher not started: %s", exc)
     yield
+    try:
+        from cloud.app.services import watcher as _watcher_stop
+
+        _watcher_stop.stop()
+    except Exception:  # noqa: BLE001
+        pass
     reset_repository()
 
 

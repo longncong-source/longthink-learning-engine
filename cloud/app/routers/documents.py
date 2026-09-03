@@ -20,8 +20,13 @@ from cloud.app.schemas import (
     DocumentOut,
     FolderUploadItem,
     FolderUploadResponse,
+    WatchedFolder,
+    WatchRegisterRequest,
+    WatchScanResponse,
+    WatchStatusResponse,
 )
 from cloud.app.security import require_api_key
+from cloud.app.services import watcher
 from cloud.app.services.document_service import (
     delete_document,
     document_to_dict,
@@ -125,6 +130,47 @@ def upload_folder(
         total_chunks=total_chunks,
         items=items,
     )
+
+
+@router.post("/watch", response_model=WatchedFolder, status_code=201)
+def register_watch(
+    body: WatchRegisterRequest, _api_key: str = Depends(require_api_key)
+) -> WatchedFolder:
+    """Đăng ký thư mục để tự động index (NEW/MODIFIED/DELETED, incremental)."""
+    try:
+        entry = watcher.register_folder(
+            body.path, str(body.project_id) if body.project_id else None
+        )
+    except ValueError as e:
+        raise ValidationError(str(e)) from e
+    return WatchedFolder(**entry)
+
+
+@router.get("/watch", response_model=WatchStatusResponse)
+def watch_status(_api_key: str = Depends(require_api_key)) -> WatchStatusResponse:
+    st = watcher.status()
+    return WatchStatusResponse(
+        running=st["running"],
+        poll_seconds=st["poll_seconds"],
+        folders=[WatchedFolder(**f) for f in st["folders"]],
+        last_scan=st["last_scan"],
+    )
+
+
+@router.post("/watch/scan", response_model=WatchScanResponse)
+def watch_scan_now(_api_key: str = Depends(require_api_key)) -> WatchScanResponse:
+    """Chạy scan incremental ngay (không đợi poll)."""
+    summary = watcher.scan_once()
+    return WatchScanResponse(**summary)
+
+
+@router.delete("/watch", status_code=204)
+def unregister_watch(
+    path: str, _api_key: str = Depends(require_api_key)
+) -> Response:
+    if not watcher.unregister_folder(path):
+        raise NotFoundError(f"Watched folder not found: {path}")
+    return Response(status_code=204)
 
 
 @router.get("", response_model=list[DocumentOut])

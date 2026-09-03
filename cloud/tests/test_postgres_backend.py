@@ -23,6 +23,9 @@ pytestmark = [
 
 PG_URL = os.environ.get("PG_TEST_DATABASE_URL", "postgresql://second_brain:second_brain@localhost:5433/second_brain")
 
+# Production vector dimension (memories.embedding is vector(768) + HNSW).
+DIM = 768
+
 
 @pytest.fixture(scope="module")
 def pg_repo():
@@ -44,7 +47,7 @@ def _record(**over):
         "importance": 0.7,
         "confidence": 0.85,
         "metadata": {"source_test": "pytest"},
-        "embedding": [0.01] * 384,
+        "embedding": [0.01] * DIM,
     }
     base.update(over)
     return MemoryRecord(**base)
@@ -60,10 +63,17 @@ class TestPostgresBackend:
         from cloud.app.db import ProjectRecord
 
         created = pg_repo.create_project(ProjectRecord(name=f"pg-test-{uuid.uuid4().hex[:8]}"))
-        assert created.id
-        fetched = pg_repo.get_project(created.id)
-        assert fetched is not None and fetched.name == created.name
-        assert pg_repo.find_project_by_name(created.name).id == created.id
+        try:
+            assert created.id
+            fetched = pg_repo.get_project(created.id)
+            assert fetched is not None and fetched.name == created.name
+            assert pg_repo.find_project_by_name(created.name).id == created.id
+        finally:
+            # no delete_project in product yet: clean test row via SQL
+            import psycopg
+
+            with psycopg.connect(PG_URL, autocommit=True) as conn:
+                conn.execute("DELETE FROM projects WHERE id=%s", (created.id,))
 
     def test_memory_crud_and_search(self, pg_repo):  # type: ignore[no-untyped-def]
         record = pg_repo.create_memory(_record())
@@ -74,7 +84,7 @@ class TestPostgresBackend:
 
         params = {
             "query": "document review before procurement",
-            "query_embedding": [0.01] * 384,
+            "query_embedding": [0.01] * DIM,
             "top_k": 5,
         }
         from cloud.app.db import SearchParams
@@ -88,7 +98,7 @@ class TestPostgresBackend:
         assert scored, "expected the seeded row to be retrievable"
         assert scored[0].record.id == record.id
 
-        neighbor = pg_repo.nearest_neighbor([0.01] * 384, None, "lesson")
+        neighbor = pg_repo.nearest_neighbor([0.01] * DIM, None, "lesson")
         assert neighbor is not None and neighbor[1] > 0.99
 
         updated = pg_repo.update_memory(record.id, {"importance": 0.95})
@@ -98,13 +108,14 @@ class TestPostgresBackend:
         assert pg_repo.get_memory(record.id) is None
 
     def test_vector_distance_ordering(self, pg_repo):  # type: ignore[no-untyped-def]
-        near = pg_repo.create_memory(_record(embedding=[1.0] + [0.0] * 383))
-        far = pg_repo.create_memory(_record(embedding=[0.0] * 383 + [1.0], title="Far memory"))
+        near = pg_repo.create_memory(_record(embedding=[1.0] + [0.0] * (DIM - 1)))
+        far = pg_repo.create_memory(_record(embedding=[0.0] * (DIM - 1) + [1.0], title="Far memory"))
         try:
             from cloud.app.db import SearchParams
 
             scored = pg_repo.search(
-                SearchParams(query="lesson", query_embedding=[1.0] + [0.0] * 383, top_k=10),
+                SearchParams(query="lesson", query_embedding=[1.0] + [0.0] * (DIM - 1), top_k=10,
+                             metadata_filter={"source_test": "pytest"}),
                 weights={"semantic": 1.0, "keyword": 0.0, "importance": 0.0, "recency": 0.0},
                 half_life_days=30,
                 candidate_limit=100,
@@ -114,3 +125,18 @@ class TestPostgresBackend:
         finally:
             pg_repo.delete_memory(near.id)
             pg_repo.delete_memory(far.id)
+
+    def test_documents_query_filter(self, pg_repo):  # type: ignore[no-untyped-def]
+        """Regression: list_documents(query=...) must not fail on typed NULL params."""
+        from cloud.app.db import DocumentRecord
+
+        doc = pg_repo.create_document(
+            DocumentRecord(filename=f"pg-q-{uuid.uuid4().hex[:8]}.md", title="Q test")
+        )
+        try:
+            assert pg_repo.list_documents(limit=5) != []
+            hits = pg_repo.list_documents(limit=50, query=doc.filename[:8])
+            assert any(d.id == doc.id for d in hits)
+            assert pg_repo.list_documents(limit=50, query="zzz-no-such-file") == []
+        finally:
+            pg_repo.delete_document(doc.id)
