@@ -374,37 +374,32 @@ async function buildTypeFilterChips(nodes) {
     // offline fallback: chips phẳng như cũ
     for (const t of flatTypes()) wrap.appendChild(makeTypeChip(t, stats[t] ?? 0));
   } else {
+    // Một nguồn số duy nhất (platform) — 8 dòng domain, không chips trùng.
     const byKey = Object.fromEntries((platform.domains || []).map((d) => [d.key, d]));
-    const shown = new Set();
-    const groups = [...DOMAIN_GROUPS.map((g) => ({ ...g, extra: false })),
-      { key: "__unclassified", label: "UNCLASSIFIED", types: [], extra: true }];
-    groups.forEach((g, gi) => {
-      const info = g.extra ? platform.unclassified : byKey[g.key];
-      if (!info) return;
-      const counts = info.memory_types || {};
-      const types = [...new Set([...g.types, ...Object.keys(counts),
-        ...(!g.extra ? [] : TYPE_ORDER.filter((t) => stats[t] !== undefined || present.has(t)))])];
-      const visible = types.filter((t) => (counts[t] ?? 0) > 0 || g.types.includes(t)
-        || present.has(t) || stats[t] !== undefined || t === "task");
-      if (!visible.length) return; // domain trống hoàn toàn thì ẩn
-      visible.forEach((t) => shown.add(t));
+    const rows = DOMAIN_GROUPS.map((g) => ({ ...g, info: byKey[g.key] }));
+    if (platform.unclassified && platform.unclassified.count > 0) {
+      rows.push({ key: "__unclassified", label: "UNCLASSIFIED", types: [], info: platform.unclassified });
+    }
+    rows.forEach((g, gi) => {
+      const info = g.info || { count: 0, memory_types: {}, status: "empty" };
       const total = info.count ?? 0;
-      const last = gi === groups.length - 1;
-      const head = document.createElement("div");
-      head.className = "vp-row";
-      head.title = `${g.label} — ${total} memories (click bật/tắt cả nhóm)`;
-      head.innerHTML = `<span class="vp-branch">${last ? "└──" : "├──"}</span>`
+      // types mà click domain sẽ bật/tắt trên graph
+      const types = [...new Set([...g.types, ...Object.keys(info.memory_types || {})])];
+      const last = gi === rows.length - 1;
+      const off = types.length && types.every((t) => !state.filters.types.has(t));
+      const row = document.createElement("div");
+      row.className = "vp-row" + (total === 0 ? " vp-empty" : "") + (off ? " off" : "");
+      const detail = Object.entries(info.memory_types || {}).map(([k, v]) => `${k}:${v}`).join(" ") || "chưa có dữ liệu";
+      row.title = `${g.label} — ${total} memories [${detail}] (click để lọc graph)`;
+      row.innerHTML = `<span class="vp-branch">${last ? "└──" : "├──"}</span>`
         + `<span class="dot ${total > 0 ? "green" : "amber"}"></span>`
         + `<span class="vp-label">${g.label}</span><b class="vp-count">${total.toLocaleString("en-US")}</b>`;
-      head.style.cursor = "pointer";
-      head.addEventListener("click", () => toggleDomainTypes(visible));
-      wrap.appendChild(head);
-      for (const t of visible) wrap.appendChild(makeTypeChip(t, counts[t] ?? stats[t] ?? 0));
+      if (types.length && total > 0) {
+        row.style.cursor = "pointer";
+        row.addEventListener("click", () => toggleDomainTypes(types));
+      }
+      wrap.appendChild(row);
     });
-    // types còn sót (có trong graph nhưng chưa map domain nào) → nhét vào cuối
-    for (const t of flatTypes()) {
-      if (!shown.has(t)) wrap.appendChild(makeTypeChip(t, stats[t] ?? 0));
-    }
   }
   // legend project — màu riêng từng project trên graph 3D
   const projRows = [];
