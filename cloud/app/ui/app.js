@@ -1028,7 +1028,7 @@ async function doComfyGenerate(){
   const status=$("#comfy-status"), preview=$("#comfy-preview"), progress=$("#comfy-progress");
   const btn=$("#comfy-generate");
   if(!prompt){ toast("Nhập prompt trước", true); return; }
-  status.textContent="⏳ đang sinh ảnh (CPU 60-90s)…"; status.className="write-result";
+  status.textContent="⏳ đang sinh ảnh (CPU 2-6 phút tùy RAM, tối đa 10 phút)…"; status.className="write-result";
   btn.disabled=true; setProgressFor(progress, 0.3);
   try{
     const data=await api("/v1/comfy/generate", {method:"POST", json:{prompt, negative, workflow_path: workflow}});
