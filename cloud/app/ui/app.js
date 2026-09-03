@@ -763,8 +763,26 @@ async function doFileSearch(silentEmpty = false) {
     setWidgetState("second", "success", "Found ✓");
     setTimeout(() => setWidgetState("second", "idle", "Idle · Ready"), 800);
     if (!docs.length) { box.innerHTML = "<em>Không có file nào.</em>"; return; }
+    // BƯỚC 1 — tìm thư mục gốc bằng TÊN tài liệu trước: tên khớp lên đầu,
+    // nhóm theo thư mục gốc để thấy cây. BƯỚC 2 mới tới Vector DB (nút 🔎).
+    const ql = q.toLowerCase();
+    const scoreName = (d) => {
+      if (!ql) return 0;
+      const fn = (d.filename || "").toLowerCase();
+      if (fn === ql) return 0;
+      if (fn.startsWith(ql)) return 1;
+      if (fn.includes(ql)) return 2;
+      return 3;
+    };
+    const sorted = [...docs].sort((a, b) => scoreName(a) - scoreName(b));
+    const groups = new Map();
+    for (const d of sorted) {
+      const root = (d.source || "").split("/")[0] || "(gốc)";
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root).push(d);
+    }
     const icon = (m) => (m || "").includes("pdf") ? "📕" : (m || "").includes("word") ? "📘" : (m || "").includes("markdown") || (m || "").includes("text") ? "📝" : "📄";
-    box.innerHTML = docs.map((d) => `
+    const fileCard = (d) => `
       <div class="sr-item" data-doc="${d.id}">
         <div class="sr-top">
           <span style="font-size:15px">${icon(d.mime_type)}</span>
@@ -775,7 +793,13 @@ async function doFileSearch(silentEmpty = false) {
         <div class="sr-actions">
           <button class="btn primary small file-open" data-doc="${d.id}">📄 Mở file</button>
           <button class="btn ghost small file-graph" data-doc="${d.id}">🎯 Graph</button>
+          <button class="btn ghost small file-vector" data-name="${esc(d.filename || d.title || "")}">🔎 Vector</button>
         </div>
+      </div>`;
+    box.innerHTML = [...groups.entries()].map(([root, arr]) => `
+      <div class="file-group">
+        <div class="file-group-head">📁 ${esc(root)} <small>${arr.length} file</small></div>
+        ${arr.map(fileCard).join("")}
       </div>`).join("");
     $$("#file-search-results .file-open").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation(); openDocument(b.dataset.doc);
@@ -787,6 +811,13 @@ async function doFileSearch(silentEmpty = false) {
         engine.focusNode(`d:${b.dataset.doc}`, Math.max(engine.scale, 1.25));
         engine.selected = node; renderDetail(node); engine._dirty = true;
       } else toast("Node file chưa có trên graph — Reload graph", true);
+    }));
+    // BƯỚC 2 — nhảy sang Vector DB với tên file làm query
+    $$("#file-search-results .file-vector").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      activateTab("search");
+      $("#search-input").value = b.dataset.name;
+      doSearch();
     }));
   } catch (e) {
     box.innerHTML = `<em style="color:var(--red)">Lỗi: ${esc(e.message)}</em>`;

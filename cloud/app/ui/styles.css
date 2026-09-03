@@ -515,3 +515,9 @@ input[type="range"]{width:100%; accent-color:var(--accent)}
 .doc-chunk{padding:8px 10px;border-left:2px solid var(--border);margin:8px 0;background:rgba(255,255,255,.02);border-radius:0 8px 8px 0}
 .doc-chunk-head{font-size:10px;color:var(--muted);margin-bottom:4px;letter-spacing:.06em}
 
+
+.file-group{margin:10px 0 4px}
+.file-group-head{font-size:12px;font-weight:700;color:var(--amber);padding:6px 10px;background:rgba(251,191,36,.07);border:1px solid var(--border);border-radius:10px;margin-bottom:6px}
+.file-group-head small{color:var(--muted);font-weight:400;margin-left:6px}
+.file-group .sr-item{margin-left:14px}
+
