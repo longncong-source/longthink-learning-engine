@@ -707,7 +707,7 @@ document.addEventListener("keydown", (e) => {
 /* ─────────── upload tab ─────────── */
 const uploadState = { target: "local", files: [], seq: 0 };
 const UPLOAD_EXT = [".pdf", ".docx", ".md", ".txt"];
-const MAX_MB = 20;
+const MAX_MB = 50;
 
 $("#cloud-url").value = localStorage.getItem("fsb.cloudUrl") || "";
 $("#cloud-key").value = localStorage.getItem("fsb.cloudKey") || "";
