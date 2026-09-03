@@ -163,6 +163,24 @@ class DocumentIngestResponse(BaseModel):
     chunks_indexed: int
 
 
+class FolderUploadItem(BaseModel):
+    filename: str
+    path: str = Field(description="Relative path inside the uploaded folder tree")
+    document_id: UUID | None = None
+    chunks_indexed: int = 0
+    error: str | None = None
+
+
+class FolderUploadResponse(BaseModel):
+    project_id: UUID | None = None
+    root: str | None = None
+    total_files: int
+    succeeded: int
+    failed: int
+    total_chunks: int
+    items: list[FolderUploadItem]
+
+
 # ---------------------------------------------------------------- obsidian (Phase 8)
 
 

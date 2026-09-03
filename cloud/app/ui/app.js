@@ -665,7 +665,7 @@ $("#project-form").addEventListener("submit", async (e) => {
     el.textContent = `✅ Đã tạo "${created.name}" (${created.id.slice(0, 8)}…)`; el.className = "write-result ok";
     $("#pf-name").value = ""; $("#pf-desc").value = "";
     // cập nhật ngay lập tức dropdown Ghi memory để thấy dự án mới (không đợi graph)
-    for (const selId of ["#wf-project", "#up-project", "#mi-project"]) {
+    for (const selId of ["#wf-project", "#up-project", "#mi-project", "#folder-project"]) {
       const sel = $(selId);
       if (sel && ![...sel.options].some((o) => o.value === created.id)) {
         const opt = document.createElement("option");
@@ -676,7 +676,7 @@ $("#project-form").addEventListener("submit", async (e) => {
     $("#wf-project").value = created.id;
     await Promise.all([loadProjects(), loadStatus(), loadGraph()]);
     // đảm bảo sau khi reload từ server vẫn giữ dự án mới (tránh bị ghi đè nếu fetch chậm)
-    for (const selId of ["#wf-project", "#up-project", "#mi-project"]) {
+    for (const selId of ["#wf-project", "#up-project", "#mi-project", "#folder-project"]) {
       const sel = $(selId);
       if (sel && ![...sel.options].some((o) => o.value === created.id)) {
         const opt = document.createElement("option");
@@ -869,15 +869,144 @@ $("#btn-upload").addEventListener("click", async () => {
   if (okCount) toast(`📤 Đã nạp ${okCount} tài liệu vào ${cfg.name}`);
 });
 
-/* ─────────── upload mode: docs ↔ bulk memory ─────────── */
+/* ─────────── upload mode: docs ↔ bulk memory ↔ folder ─────────── */
 $$("#upload-mode .chip").forEach((chip) => chip.addEventListener("click", () => {
   $$("#upload-mode .chip").forEach((c) => c.classList.remove("active"));
   chip.classList.add("active");
   const mode = chip.dataset.mode;
   $("#pane-docs").classList.toggle("hidden", mode !== "docs");
   $("#pane-bulk").classList.toggle("hidden", mode !== "bulk");
+  $("#pane-folder").classList.toggle("hidden", mode !== "folder");
   if (mode === "bulk" && $("#mi-project").options.length <= 1) fillUploadProjects();
+  if (mode === "folder") fillFolderProjects();
 }));
+
+/* ─────────── folder → project upload (giữ cây thư mục) ─────────── */
+const folderState = { files: [] };
+const FOLDER_EXT = [".pdf", ".docx", ".md", ".txt"];
+
+async function fillFolderProjects() {
+  const cfg = uploadCfg();
+  const sel = $("#folder-project");
+  if (!sel) return;
+  if (uploadState.target === "cloud" && !cfg.base) return;
+  const keep = sel.value || localStorage.getItem("fsb.folderProject") || "";
+  try {
+    const res = await fetch(`${cfg.base}/v1/projects?limit=200`, { headers: { "X-API-Key": cfg.key } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const projects = await res.json();
+    sel.innerHTML = `<option value="">— chọn project —</option>` +
+      projects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+    if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+    setTimeout(initCustomSelects, 60);
+  } catch (e) {
+    toast(`Không lấy được project cho folder upload: ${e.message}`, true);
+  }
+}
+$("#folder-project")?.addEventListener("change", (e) => {
+  localStorage.setItem("fsb.folderProject", e.target.value || "");
+});
+
+function renderFolderTree() {
+  const wrap = $("#folder-tree");
+  const files = folderState.files;
+  // group theo thư mục cha để thấy cây
+  const groups = {};
+  for (const f of files) {
+    const parts = f.rel.split("/");
+    const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : "(gốc)";
+    (groups[dir] ||= []).push(f);
+  }
+  wrap.innerHTML = Object.keys(groups).sort().map((dir) =>
+    `<div style="margin:4px 0"><div style="color:var(--amber);font-size:11px">📁 ${esc(dir)}</div>` +
+    groups[dir].map((f) =>
+      `<div class="file-item"><span>📄</span><span class="f-name">${esc(f.file.name)}</span>` +
+      `<span class="f-size">${humanSize(f.file.size)}</span>` +
+      `<span class="f-status" style="color:var(--muted)">${esc(f.rel)}</span></div>`
+    ).join("") + `</div>`
+  ).join("") || `<em style="color:var(--muted)">Chưa chọn thư mục.</em>`;
+  $("#folder-count").textContent = files.length ? `(${files.length})` : "";
+  $("#btn-folder-upload").disabled = !files.length;
+  const rootInput = $("#folder-root");
+  if (files.length && !rootInput.value) {
+    rootInput.placeholder = `mặc định: ${files[0].rel.split("/")[0] || "folder"}`;
+  }
+}
+
+function addFolderFiles(list) {
+  let skipped = 0;
+  for (const f of list) {
+    const rel = f.webkitRelativePath || f.name;
+    const ext = "." + f.name.split(".").pop().toLowerCase();
+    if (!FOLDER_EXT.includes(ext)) { skipped++; continue; }
+    if (f.size > MAX_MB * 1048576) { skipped++; continue; }
+    if (folderState.files.some((x) => x.rel === rel)) continue;
+    folderState.files.push({ file: f, rel });
+  }
+  if (skipped) toast(`Bỏ qua ${skipped} file (sai định dạng/quá ${MAX_MB}MB)`, true);
+  if (folderState.files.length > 100) {
+    folderState.files = folderState.files.slice(0, 100);
+    toast("Giới hạn 100 file/lần — chia nhỏ thư mục", true);
+  }
+  renderFolderTree();
+}
+
+$("#folder-dropzone")?.addEventListener("click", () => $("#folder-input").click());
+$("#folder-input")?.addEventListener("change", (e) => { addFolderFiles(e.target.files); e.target.value = ""; });
+$("#btn-folder-clear")?.addEventListener("click", () => { folderState.files = []; renderFolderTree(); });
+
+$("#btn-folder-upload")?.addEventListener("click", async () => {
+  const cfg = uploadCfg();
+  const pid = $("#folder-project").value;
+  if (!pid) { toast("Chọn project đích trước", true); return; }
+  if (!cfg.key) { toast("Chưa có API key cho đích đã chọn", true); return; }
+  if (!folderState.files.length) return;
+  localStorage.setItem("fsb.folderProject", pid);
+
+  const fd = new FormData();
+  for (const f of folderState.files) fd.append("files", f.file, f.file.name);
+  fd.append("paths", JSON.stringify(folderState.files.map((f) => f.rel)));
+  fd.append("project_id", pid);
+  const rootGuess = folderState.files[0].rel.split("/")[0] || "";
+  fd.append("root", $("#folder-root").value.trim() || rootGuess);
+
+  const btn = $("#btn-folder-upload"), summary = $("#folder-summary");
+  btn.disabled = true;
+  summary.textContent = `⏳ đang upload ${folderState.files.length} file giữ cây thư mục…`;
+  summary.className = "write-result";
+  setProgressFor($("#folder-progress"), 0.3);
+  setWidgetState("first", "processing", "Ingesting folder…");
+  try {
+    const res = await fetch(`${cfg.base}/v1/documents/upload-folder`, {
+      method: "POST",
+      headers: { "X-API-Key": cfg.key },
+      body: fd,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${body?.error?.message || ""}`.trim());
+    setProgressFor($("#folder-progress"), 1);
+    summary.textContent =
+      `✅ Xong: ${body.succeeded}/${body.total_files} file (${body.total_chunks} chunk) → project` +
+      (body.failed ? `, ${body.failed} lỗi` : "");
+    summary.className = `write-result ${body.failed && !body.succeeded ? "err" : "ok"}`;
+    const errs = (body.items || []).filter((i) => i.error).slice(0, 5);
+    if (errs.length) summary.textContent += " — lỗi: " + errs.map((i) => `${i.path}: ${i.error}`).join("; ");
+    if (body.succeeded) {
+      folderState.files = [];
+      renderFolderTree();
+      if (uploadState.target === "local") await Promise.all([loadGraph(), loadStatus()]);
+      toast(`📁 Đã nạp thư mục: ${body.succeeded} file vào project`);
+    }
+    setWidgetState("first", "success", "Success ✓");
+  } catch (e) {
+    summary.textContent = "❌ " + e.message;
+    summary.className = "write-result err";
+    toast("Upload thư mục lỗi: " + e.message, true);
+  } finally {
+    btn.disabled = !folderState.files.length;
+    setTimeout(() => setProgressFor($("#folder-progress"), null), 800);
+  }
+});
 
 /* ─────────── bulk file → memory import ─────────── */
 const bulkState = { files: [], seq: 0 };
@@ -1028,7 +1157,7 @@ async function doComfyGenerate(){
   const status=$("#comfy-status"), preview=$("#comfy-preview"), progress=$("#comfy-progress");
   const btn=$("#comfy-generate");
   if(!prompt){ toast("Nhập prompt trước", true); return; }
-  status.textContent="⏳ đang sinh ảnh (CPU 2-6 phút tùy RAM, tối đa 10 phút)…"; status.className="write-result";
+  status.textContent="⏳ đang sinh ảnh (CPU 60-90s)…"; status.className="write-result";
   btn.disabled=true; setProgressFor(progress, 0.3);
   try{
     const data=await api("/v1/comfy/generate", {method:"POST", json:{prompt, negative, workflow_path: workflow}});
@@ -1154,7 +1283,7 @@ function enhanceSelect(sel){
   sync(); build();
 }
 function initCustomSelects(){
-  ["#wf-project","#wf-type","#up-project","#mi-project","#mi-type","#search-topk"].forEach(id=>{ const el=document.querySelector(id); if(el&&el.tagName==="SELECT") enhanceSelect(el); });
+  ["#wf-project","#wf-type","#up-project","#mi-project","#mi-type","#search-topk","#folder-project"].forEach(id=>{ const el=document.querySelector(id); if(el&&el.tagName==="SELECT") enhanceSelect(el); });
   document.querySelectorAll(".write-form select, .upload-right select, .search-bar select").forEach(enhanceSelect);
 }
 

@@ -130,3 +130,42 @@ class TestListAndGet:
 
         fetched = client.get(f"/v1/documents/{created['id']}", headers=AUTH_HEADERS)
         assert fetched.status_code == 200
+
+
+class TestUploadFolder:
+    def _folder_post(self, client, files_data, paths, **form):  # type: ignore[no-untyped-def]
+        import json
+
+        files = [("files", (name, data, "text/markdown")) for name, data in files_data]
+        data = {"paths": json.dumps(paths), **form}
+        return client.post("/v1/documents/upload-folder", files=files, data=data, headers=AUTH_HEADERS)
+
+    def test_folder_preserves_tree_and_project(self, client):  # type: ignore[no-untyped-def]
+        proj = client.post("/v1/projects", json={"name": "FolderProj"}, headers=AUTH_HEADERS).json()
+        files_data = [
+            ("a.md", b"# Root note\n\nRoot content here."),
+            ("b.md", b"# Sub note\n\nSub content here."),
+        ]
+        resp = self._folder_post(
+            client, files_data, ["README.md", "docs/guide.md"], project_id=proj["id"], root="myfolder"
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["total_files"] == 2 and body["succeeded"] == 2 and body["failed"] == 0
+        assert body["project_id"] == proj["id"]
+        sources = sorted(i["path"] for i in body["items"])
+        assert sources == ["README.md", "docs/guide.md"]
+        listed = client.get("/v1/documents", params={"project_id": proj["id"]}, headers=AUTH_HEADERS).json()
+        listed_sources = sorted(d["source"] for d in listed)
+        assert listed_sources == ["myfolder/README.md", "myfolder/docs/guide.md"]
+
+    def test_folder_paths_mismatch_422(self, client):  # type: ignore[no-untyped-def]
+        resp = self._folder_post(client, [("a.md", b"data")], ["a.md", "extra.md"])
+        assert resp.status_code == 422
+
+    def test_folder_requires_auth(self, client):  # type: ignore[no-untyped-def]
+        import json
+
+        files = [("files", ("a.md", b"data", "text/markdown"))]
+        resp = client.post("/v1/documents/upload-folder", files=files, data={"paths": json.dumps(["a.md"])})
+        assert resp.status_code == 401

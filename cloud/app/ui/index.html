@@ -230,6 +230,7 @@
         <div class="target-row" id="upload-mode">
           <button class="chip active" data-mode="docs">📄 Tài liệu → RAG</button>
           <button class="chip" data-mode="bulk">🧠 File → Memory</button>
+          <button class="chip" data-mode="folder">📁 Thư mục → Project</button>
         </div>
       </div>
       <div class="top-block">
@@ -276,6 +277,39 @@
             <button class="btn ghost" id="btn-clear-files">Xoá danh sách</button>
           </div>
           <div id="up-summary" class="write-result"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══ Pane C: cả thư mục → project (giữ cây thư mục) ═══ -->
+    <div id="pane-folder" class="hidden">
+      <div class="upload-layout">
+
+        <div class="upload-left">
+          <div class="dropzone" id="folder-dropzone">
+            <div style="font-size:30px">📁</div>
+            <b>Bấm để chọn cả thư mục</b>
+            <span>giữ nguyên cây thư mục — PDF · DOCX · MD · TXT (≤ 100 file, ≤ 20 MB/file)</span>
+          </div>
+          <input id="folder-input" type="file" webkitdirectory multiple class="hidden" />
+          <div id="folder-tree" class="file-list"></div>
+        </div>
+
+        <div class="upload-right">
+          <label>Project đích *
+            <select id="folder-project"><option value="">— chọn project —</option></select>
+          </label>
+          <label>Tên gốc (tuỳ chọn — tiền tố source)
+            <input id="folder-root" maxlength="200" placeholder="mặc định: tên thư mục đã chọn" />
+          </label>
+          <div class="progress hidden" id="folder-progress"><i></i></div>
+          <div class="form-row actions" style="margin:0">
+            <button class="btn primary" id="btn-folder-upload" disabled>📁 Upload thư mục <span id="folder-count"></span></button>
+            <button class="btn ghost" id="btn-folder-clear">Xoá danh sách</button>
+          </div>
+          <div id="folder-summary" class="write-result"></div>
+          <small class="muted-note">Mỗi file giữ <code>source = gốc/đường_dẫn_tương_đối</code> trong cùng project — RAG trích dẫn giữ ngữ cảnh thư mục. Qua redact secrets + dedupe như upload thường.</small>
         </div>
 
       </div>
@@ -528,8 +562,8 @@
 
 <div id="toast-zone"></div>
 
-<script src="/ui/graph.js?v=20260831k"></script>
-<script src="/ui/app.js?v=20260831k"></script>
+<script src="/ui/graph.js?v=20260831l"></script>
+<script src="/ui/app.js?v=20260831l"></script>
 </body>
 </html>
 

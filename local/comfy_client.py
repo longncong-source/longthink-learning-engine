@@ -66,7 +66,7 @@ class ComfyClient:
                 wf["3"]["inputs"]["seed"] = int(uuid.uuid4().int % 2_000_000_000)
         return wf
 
-    def generate(self, prompt: str, negative: str = "", workflow_path: str | None = None, timeout: float = 600) -> dict[str, Any]:
+    def generate(self, prompt: str, negative: str = "", workflow_path: str | None = None, timeout: float = 240) -> dict[str, Any]:
         wf_path = workflow_path or self.workflow_path
         wf = self._load_workflow(prompt, negative)
         if wf_path and Path(wf_path).exists():
@@ -89,45 +89,22 @@ class ComfyClient:
         prompt_id = r.json().get("prompt_id")
         if not prompt_id:
             raise ComfyUnavailable("No prompt_id returned")
-        # poll history — fail fast on execution_error (e.g. OOM paging file)
-        # or server death (crash) instead of polling till timeout with a
-        # misleading message
+        # poll history
         t0 = time.time()
-        dead_polls = 0
         while time.time() - t0 < timeout:
             try:
                 h = self._http.get(f"{self.base_url}/history/{prompt_id}", timeout=5)
-                dead_polls = 0
                 if h.status_code == 200:
                     data = h.json()
                     if prompt_id in data:
-                        entry = data[prompt_id]
-                        status = entry.get("status") or {}
-                        if status.get("status_str") == "error":
-                            msgs = status.get("messages") or []
-                            detail = ""
-                            for m in msgs:
-                                if isinstance(m, list) and len(m) == 2 and m[0] == "execution_error":
-                                    d = m[1] or {}
-                                    detail = f"node {d.get('node_id')} ({d.get('node_type')}): {d.get('exception_message', '').strip()}"
-                                    break
-                            raise ComfyUnavailable(f"ComfyUI execution error {prompt_id}: {detail or status}")
-                        outputs = entry.get("outputs", {})
+                        outputs = data[prompt_id].get("outputs", {})
                         for _, out in outputs.items():
                             if "images" in out:
                                 images = out["images"]
                                 if images:
-                                    return {"prompt_id": prompt_id, "images": images, "raw": entry}
-            except ComfyUnavailable:
-                raise
-            except Exception as e:
-                dead_polls += 1
-                if dead_polls >= 5:
-                    raise ComfyUnavailable(
-                        f"ComfyUI server unreachable during generation {prompt_id} "
-                        f"({dead_polls} failed polls) — likely crashed (OOM). "
-                        f"Free RAM (close Edge/Discord/OpenCode desktop) and restart :8188"
-                    ) from e
+                                    return {"prompt_id": prompt_id, "images": images, "raw": data[prompt_id]}
+            except Exception:
+                pass
             time.sleep(1.2)
         raise ComfyUnavailable(f"Timeout waiting for ComfyUI result {prompt_id}")
 

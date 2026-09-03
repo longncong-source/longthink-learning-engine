@@ -40,3 +40,8 @@ local_data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local 1-click ops scripts (may contain local-only passwords) — never publish
+/*.bat
+/README_*.txt
+/START_*.txt
