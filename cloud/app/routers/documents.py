@@ -131,11 +131,14 @@ def upload_folder(
 def list_documents(
     limit: int = 50,
     project_id: UUID | None = None,
+    q: str | None = None,
     _api_key: str = Depends(require_api_key),
 ) -> list[DocumentOut]:
+    """Tìm file gốc: lọc theo tên file / tiêu đề / cây thư mục (source), + project."""
     rows = get_repository().list_documents(
         limit=max(1, min(limit, 500)),
         project_id=str(project_id) if project_id else None,
+        query=(q or "").strip() or None,
     )
     return [DocumentOut(**document_to_dict(r)) for r in rows]
 

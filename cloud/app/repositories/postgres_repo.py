@@ -473,14 +473,23 @@ class PostgresRepository(BaseRepository):
         row = self._fetchone("SELECT * FROM documents WHERE id=%(id)s::uuid", {"id": document_id})
         return self._document_from_row(row) if row else None
 
-    def list_documents(self, limit: int = 50, project_id: str | None = None) -> list[DocumentRecord]:
+    def list_documents(
+        self, limit: int = 50, project_id: str | None = None, query: str | None = None
+    ) -> list[DocumentRecord]:
         rows = self._fetchall(
             """
             SELECT * FROM documents
             WHERE (%(project_id)s::uuid IS NULL OR project_id=%(project_id)s::uuid)
+              AND (%(q)s IS NULL OR filename ILIKE %(like)s OR COALESCE(title,'') ILIKE %(like)s
+                   OR COALESCE(source,'') ILIKE %(like)s)
             ORDER BY created_at DESC LIMIT %(limit)s
             """,
-            {"limit": int(limit), "project_id": project_id},
+            {
+                "limit": int(limit),
+                "project_id": project_id,
+                "q": query or None,
+                "like": f"%{query}%" if query else None,
+            },
         )
         return [self._document_from_row(r) for r in rows]
 

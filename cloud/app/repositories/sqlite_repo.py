@@ -480,12 +480,20 @@ class SqliteRepository(BaseRepository):
         self,
         limit: int = 50,
         project_id: str | None = None,
+        query: str | None = None,
     ) -> list[DocumentRecord]:
         sql = "SELECT * FROM documents"
+        conds: list[str] = []
         values: list = []
         if project_id:
-            sql += " WHERE project_id=?"
+            conds.append("project_id=?")
             values.append(project_id)
+        if query:
+            conds.append("(filename LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\')")
+            like = f"%{query.replace('%', '\\%').replace('_', '\\_')}%"
+            values.extend([like, like, like])
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
         sql += " ORDER BY created_at DESC LIMIT ?"
         values.append(int(limit))
         with self._lock:

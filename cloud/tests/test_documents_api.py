@@ -145,6 +145,13 @@ class TestListAndGet:
         resp = client.get(f"/v1/documents/{uuid.uuid4()}/content", headers=AUTH_HEADERS)
         assert resp.status_code == 404
 
+    def test_list_search_by_filename_and_source(self, client):  # type: ignore[no-untyped-def]
+        _upload(client, name="guide.md", data=b"# Guide\nbeta")
+        got = client.get("/v1/documents", params={"q": "guide"}, headers=AUTH_HEADERS).json()
+        assert any(d["filename"] == "guide.md" for d in got)
+        none = client.get("/v1/documents", params={"q": "zzz-no-such-file"}, headers=AUTH_HEADERS).json()
+        assert none == []
+
 
 class TestUploadFolder:
     def _folder_post(self, client, files_data, paths, **form):  # type: ignore[no-untyped-def]

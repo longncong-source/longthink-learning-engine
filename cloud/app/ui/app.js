@@ -547,6 +547,7 @@ function activateTab(name) {
   if (name === "upload" && $("#up-project").options.length <= 1) fillUploadProjects();
   if (name === "projects") loadProjects();
   if (name === "comfy") checkComfyHealth();
+  if (name === "files") { fillFileProjects(); doFileSearch(true); }
 }
 
 $$(".tab").forEach((t) => t.addEventListener("click", () => activateTab(t.dataset.tab)));
@@ -725,6 +726,76 @@ async function doSearch() {
     setWidgetState("mid","idle","Idle · Ready");
   }
 }
+
+/* ─────────── files tab — tìm file gốc ─────────── */
+async function fillFileProjects() {
+  const sel = $("#file-search-project");
+  if (!sel || sel.options.length > 1) return;
+  try {
+    const projects = await api("/v1/projects?limit=200");
+    sel.innerHTML = `<option value="">— mọi project —</option>` +
+      projects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+    setTimeout(initCustomSelects, 60);
+  } catch { /* ignore */ }
+}
+
+async function doFileSearch(silentEmpty = false) {
+  const q = $("#file-search-input").value.trim();
+  const pid = $("#file-search-project").value;
+  const box = $("#file-search-results");
+  if (!q && !pid) {
+    if (!silentEmpty) box.innerHTML = "<em>Nhập từ khoá hoặc chọn project…</em>";
+    else {
+      // mở tab lần đầu: liệt kê file mới nhất luôn cho trực quan
+      box.innerHTML = "<em>⏳ đang tải file mới nhất…</em>";
+    }
+  } else {
+    box.innerHTML = "<em>⏳ đang tìm file…</em>";
+  }
+  setWidgetState("second", "querying", "Finding files…");
+  try {
+    const params = new URLSearchParams({
+      limit: $("#file-search-limit").value || "50",
+    });
+    if (q) params.set("q", q);
+    if (pid) params.set("project_id", pid);
+    const docs = await api(`/v1/documents?${params.toString()}`);
+    setWidgetState("second", "success", "Found ✓");
+    setTimeout(() => setWidgetState("second", "idle", "Idle · Ready"), 800);
+    if (!docs.length) { box.innerHTML = "<em>Không có file nào.</em>"; return; }
+    const icon = (m) => (m || "").includes("pdf") ? "📕" : (m || "").includes("word") ? "📘" : (m || "").includes("markdown") || (m || "").includes("text") ? "📝" : "📄";
+    box.innerHTML = docs.map((d) => `
+      <div class="sr-item" data-doc="${d.id}">
+        <div class="sr-top">
+          <span style="font-size:15px">${icon(d.mime_type)}</span>
+          <span class="sr-title">${esc(d.filename || d.title || d.id.slice(0, 8))}</span>
+        </div>
+        ${d.source ? `<div class="sr-snippet" style="color:var(--amber)">📁 ${esc(d.source)}</div>` : ""}
+        <div class="sr-snippet">${esc(d.title || "")}${d.title ? " · " : ""}${fmtDate(d.created_at)}</div>
+        <div class="sr-actions">
+          <button class="btn primary small file-open" data-doc="${d.id}">📄 Mở file</button>
+          <button class="btn ghost small file-graph" data-doc="${d.id}">🎯 Graph</button>
+        </div>
+      </div>`).join("");
+    $$("#file-search-results .file-open").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation(); openDocument(b.dataset.doc);
+    }));
+    $$("#file-search-results .file-graph").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const node = engine.nodeById.get(`d:${b.dataset.doc}`);
+      if (node) {
+        engine.focusNode(`d:${b.dataset.doc}`, Math.max(engine.scale, 1.25));
+        engine.selected = node; renderDetail(node); engine._dirty = true;
+      } else toast("Node file chưa có trên graph — Reload graph", true);
+    }));
+  } catch (e) {
+    box.innerHTML = `<em style="color:var(--red)">Lỗi: ${esc(e.message)}</em>`;
+    setWidgetState("second", "idle", "Idle · Ready");
+  }
+}
+$("#file-search-go")?.addEventListener("click", () => doFileSearch());
+$("#file-search-input")?.addEventListener("keydown", (e) => { if (e.key === "Enter") doFileSearch(); });
+$("#file-search-project")?.addEventListener("change", () => doFileSearch(true));
 
 /* ─────────── projects tab ─────────── */
 let activeProjectFilter = null;
@@ -1438,7 +1509,7 @@ function enhanceSelect(sel){
   sync(); build();
 }
 function initCustomSelects(){
-  ["#wf-project","#wf-type","#up-project","#mi-project","#mi-type","#search-topk","#folder-project"].forEach(id=>{ const el=document.querySelector(id); if(el&&el.tagName==="SELECT") enhanceSelect(el); });
+  ["#wf-project","#wf-type","#up-project","#mi-project","#mi-type","#search-topk","#folder-project","#file-search-project","#file-search-limit"].forEach(id=>{ const el=document.querySelector(id); if(el&&el.tagName==="SELECT") enhanceSelect(el); });
   document.querySelectorAll(".write-form select, .upload-right select, .search-bar select").forEach(enhanceSelect);
 }
 
