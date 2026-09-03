@@ -213,6 +213,7 @@ async function loadStatus() {
     document.getElementById("node-first").className = `bridge-node local ${fbOnline ? "online" : "offline"}`;
     renderStatsMini(s);
     fillProjectSelect().catch(() => {});
+    loadVectorPlatform().catch(() => {});
     // Mid + widget — widget reflects Network (true), not AI
     loadMidBrainStatus().then(mid=>{
       updateWidget({ isOnline: isNetworkOnline, emb, s, mid });
@@ -247,6 +248,36 @@ function fmtDuration(sec) {
     return `${m}m${s}s`;
   }
 const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ONE VECTOR PLATFORM — 8 logical knowledge domains + trạng thái
+async function loadVectorPlatform() {
+  const box = $("#vp-tree");
+  try {
+    const p = await api("/v1/memory/knowledge-domains");
+    $("#vp-backend").textContent = `${p.backend} · ${p.embedding_dimension}d`;
+    const rows = p.domains.map((d, i) => {
+      const last = i === p.domains.length - 1 && !p.unclassified.count;
+      const branch = last ? "└──" : "├──";
+      const dot = d.status === "active" ? "green" : "amber";
+      const types = Object.entries(d.memory_types || {}).map(([k, v]) => `${k}:${v}`).join(" ");
+      return `<div class="vp-row" title="${esc(types || "chưa có dữ liệu")}">`
+        + `<span class="vp-branch">${branch}</span>`
+        + `<span class="dot ${dot}"></span>`
+        + `<span class="vp-label">${esc(d.label)}</span>`
+        + `<b class="vp-count">${d.count.toLocaleString("en-US")}</b></div>`;
+    });
+    if (p.unclassified && p.unclassified.count) {
+      const types = Object.entries(p.unclassified.memory_types || {}).map(([k, v]) => `${k}:${v}`).join(" ");
+      rows.push(`<div class="vp-row" title="${esc(types)}"><span class="vp-branch">└──</span>`
+        + `<span class="dot amber"></span><span class="vp-label muted-note">UNCLASSIFIED</span>`
+        + `<b class="vp-count">${p.unclassified.count.toLocaleString("en-US")}</b></div>`);
+    }
+    box.innerHTML = `<div class="vp-root">ONE VECTOR PLATFORM · ${p.total_memories.toLocaleString("en-US")} memories</div>` + rows.join("");
+    box.title = `backend ${p.backend} · click domain không lọc — xem chi tiết ở tab search`;
+  } catch (e) {
+    box.innerHTML = `<div class="muted-note">không tải được domains</div>`;
+  }
+}
 
 function renderStatsMini(status) {
   const byType = status.counts.memories_by_type || {};

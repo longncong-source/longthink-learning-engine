@@ -161,6 +161,10 @@ class BaseRepository(ABC):
     @abstractmethod
     def count_memories(self) -> int: ...
 
+    @abstractmethod
+    def memory_type_matrix(self) -> list[dict]:
+        """(type, knowledge_type) -> count rows for knowledge-domain mapping."""
+
     # --- projects ---
     @abstractmethod
     def create_project(self, record: ProjectRecord) -> ProjectRecord: ...

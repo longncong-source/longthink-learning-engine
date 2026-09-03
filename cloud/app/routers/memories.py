@@ -10,6 +10,7 @@ from cloud.app import metrics
 from cloud.app.db import get_repository
 from cloud.app.errors import NotFoundError
 from cloud.app.schemas import (
+    KnowledgePlatformResponse,
     MemoryCreate,
     MemoryImportResponse,
     MemoryOut,
@@ -24,6 +25,14 @@ from cloud.app.services.memory_import import import_memories
 from cloud.app.services.memory_service import record_to_out, search_memories, upsert_memory
 
 router = APIRouter(prefix="/v1/memory", tags=["memory"])
+
+
+@router.get("/knowledge-domains", response_model=KnowledgePlatformResponse)
+def knowledge_domains(_api_key: str = Depends(require_api_key)) -> KnowledgePlatformResponse:
+    """ONE VECTOR PLATFORM: 8 logical knowledge domains + trạng thái trên memory types."""
+    from cloud.app.services.knowledge_domains import platform_status
+
+    return KnowledgePlatformResponse(**platform_status())
 
 
 @router.get("", response_model=list[MemoryOut])

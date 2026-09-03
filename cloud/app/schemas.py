@@ -265,3 +265,19 @@ class WatchScanResponse(BaseModel):
     unchanged: int = 0
     skipped: int = 0
     errors: list[str] = []
+
+
+class KnowledgeDomainStatus(BaseModel):
+    key: str
+    label: str
+    count: int
+    status: str
+    memory_types: dict = {}
+
+
+class KnowledgePlatformResponse(BaseModel):
+    backend: str
+    embedding_dimension: int
+    total_memories: int
+    domains: list[KnowledgeDomainStatus]
+    unclassified: dict = {}

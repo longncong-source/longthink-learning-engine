@@ -378,6 +378,17 @@ class PostgresRepository(BaseRepository):
         row = self._fetchone("SELECT COUNT(*) AS c FROM memories", {})
         return int((row or {}).get("c") or 0)
 
+    def memory_type_matrix(self) -> list[dict]:
+        rows = self._fetchall(
+            "SELECT type AS t, COALESCE(metadata->>'knowledge_type', '') AS kt,"
+            " COUNT(*) AS c FROM memories GROUP BY t, kt",
+            {},
+        )
+        return [
+            {"type": r.get("t"), "knowledge_type": r.get("kt") or None, "count": int(r.get("c") or 0)}
+            for r in rows
+        ]
+
     # --------------------------------------------------------------- projects
     def create_project(self, record: ProjectRecord) -> ProjectRecord:
         record.id = record.id or str(uuid.uuid4())

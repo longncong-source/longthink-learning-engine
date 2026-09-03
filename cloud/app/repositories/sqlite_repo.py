@@ -380,6 +380,14 @@ class SqliteRepository(BaseRepository):
             row = self._conn.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
         return int(row["c"])
 
+    def memory_type_matrix(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT type AS t, COALESCE(json_extract(metadata, '$.knowledge_type'), '') AS kt,"
+                " COUNT(*) AS c FROM memories GROUP BY t, kt"
+            ).fetchall()
+        return [{"type": r["t"], "knowledge_type": r["kt"] or None, "count": int(r["c"])} for r in rows]
+
     # --------------------------------------------------------------- projects
     def create_project(self, record: ProjectRecord) -> ProjectRecord:
         record.id = record.id or str(uuid.uuid4())
