@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     max_candidates: int = 2000
 
     # Documents / RAG ingestion (spec sections 31-32)
-    max_upload_mb: int = 50
+    max_upload_mb: int = 200
     chunk_size_chars: int = 1200
     chunk_overlap_chars: int = 150
     documents_importance: float = 0.55
