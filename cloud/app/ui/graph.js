@@ -1,4 +1,11 @@
-/* ══════════ Force-directed graph engine (canvas, zero deps) ══════════ */
+/* ══════════ Force-directed 3D graph engine (canvas, zero deps) ══════════
+ * True 3D: nodes live in x/y/z on a moon-base sphere, perspective-projected
+ * each frame with Y-rotation (auto-spin + drag) and X-tilt. Painter's
+ * algorithm (back-to-front), depth shading, per-project colors via n._pcol.
+ * Public API kept compatible with app.js: setData, setVisibleFilter,
+ * isVisible, focusNode, fitView, reheat, nodeById, nodes, links, scale,
+ * selected, _dirty, neighbors, radiusOf.
+ */
 "use strict";
 
 class ForceGraph {
@@ -24,6 +31,7 @@ class ForceGraph {
     this.hovered = null;
     this.selected = null;
     this.dragNode = null;
+    this.rotating = false;
     this.panning = false;
     this._lastPointer = null;
     this._dirty = true;
@@ -31,6 +39,11 @@ class ForceGraph {
     this.visibleFilter = null; // (node)=>bool
     this.sphereR = 340; // moon base radius (world units)
     this.sphereMode = true;
+
+    // 3D camera state
+    this.rotY = 0.6; // slow auto-spin around Y
+    this.rotX = 0.32; // fixed tilt + drag
+    this.focal = 1150; // perspective focal length (world units)
 
     this._bind();
     this._resize();
@@ -43,33 +56,23 @@ class ForceGraph {
     const prev = this.nodeById;
     const N = nodes.length;
     const R = this.sphereR;
-    // fibonacci sphere projection -> phân bố đều trên quả cầu (moon base)
+    // fibonacci sphere -> phân bố đều trên quả cầu 3D thật
     const golden = Math.PI * (3 - Math.sqrt(5));
     this.nodes = nodes.map((n, i) => {
       const old = prev.get(n.id);
-      if (old) return { ...n, x: old.x, y: old.y, vx: 0, vy: 0, fixed: old.fixed, _theta: old._theta, _phi: old._phi };
-      // phân phối đều trên sphere (y = 1 - 2i/N)
+      if (old) return { ...n, x: old.x, y: old.y, z: old.z ?? 0, vx: 0, vy: 0, vz: 0, fixed: old.fixed };
       const y = 1 - (i / Math.max(1, N - 1)) * 2;
       const radius = Math.sqrt(Math.max(0, 1 - y * y));
       const theta = golden * i;
-      const x = Math.cos(theta) * radius;
-      const z = Math.sin(theta) * radius;
-      // orthographic projection: y -> y, x -> x (z dùng cho độ sâu / alpha)
-      const px = x * R * (0.72 + Math.random() * 0.28);
-      const py = y * R * (0.72 + Math.random() * 0.28);
-      // project nodes: 85% trên vỏ sphere, 15% lõi
       const isCore = Math.random() < 0.15;
       const rFac = isCore ? (0.18 + Math.random() * 0.55) : (0.82 + Math.random() * 0.18);
       return {
         ...n,
-        x: px * rFac,
-        y: py * rFac,
-        vx: 0,
-        vy: 0,
+        x: Math.cos(theta) * radius * R * rFac,
+        y: y * R * rFac,
+        z: Math.sin(theta) * radius * R * rFac,
+        vx: 0, vy: 0, vz: 0,
         fixed: false,
-        _theta: theta,
-        _phi: Math.acos(y),
-        _z: z,
       };
     });
     const ids = new Set(nodes.map((n) => n.id));
@@ -100,32 +103,47 @@ class ForceGraph {
   setVisibleFilter(fn) { this.visibleFilter = fn; this._dirty = true; }
   isVisible(n) { return !this.visibleFilter || this.visibleFilter(n); }
 
+  /* ── 3D projection ── */
+  _project(n) {
+    // rotate Y then tilt X
+    const cy = Math.cos(this.rotY), sy = Math.sin(this.rotY);
+    const x1 = n.x * cy - n.z * sy;
+    const z1 = n.x * sy + n.z * cy;
+    const cx = Math.cos(this.rotX), sx = Math.sin(this.rotX);
+    const y2 = n.y * cx - z1 * sx;
+    const z2 = n.y * sx + z1 * cx;
+    const s = this.focal / Math.max(80, this.focal + z2);
+    n._sx = x1 * s;
+    n._sy = y2 * s;
+    n._ss = s;
+    n._depth = Math.max(0, Math.min(1, (z2 + this.sphereR * 1.3) / (this.sphereR * 2.6)));
+    return n;
+  }
+
+  _projectAll() {
+    for (const n of this.nodes) this._project(n);
+  }
+
   /* ── layout ── */
   fitView(pad = 70) {
-    const vis = this.nodes.filter((n) => this.isVisible(n));
-    if (!vis.length) return;
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const n of vis) {
-      x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y);
-      x1 = Math.max(x1, n.x); y1 = Math.max(y1, n.y);
-    }
-    const w = Math.max(x1 - x0, 60), h = Math.max(y1 - y0, 60);
     const cw = this.canvas.width / devicePixelRatio, ch = this.canvas.height / devicePixelRatio;
-    this.scale = Math.min(Math.min((cw - pad * 2) / w, (ch - pad * 2) / h), 2.2);
-    this.panX = cw / 2 - ((x0 + x1) / 2) * this.scale;
-    this.panY = ch / 2 - ((y0 + y1) / 2) * this.scale;
+    const R = this.sphereR * 1.3;
+    this.scale = Math.min(Math.min((cw - pad * 2) / (R * 2), (ch - pad * 2) / (R * 2)), 2.2);
+    this.scale = Math.max(0.12, this.scale);
+    this.panX = cw / 2;
+    this.panY = ch / 2;
     this._dirty = true;
   }
 
   focusNode(id, zoomTo = 1.4) {
     const n = this.nodeById.get(id);
     if (!n) return;
+    this._project(n);
     const target = zoomTo;
     const cw = this.canvas.width / devicePixelRatio, ch = this.canvas.height / devicePixelRatio;
-    // animate pan/scale quickly
     const startS = this.scale, startX = this.panX, startY = this.panY;
     const endS = target;
-    const endX = cw / 2 - n.x * endS, endY = ch / 2 - n.y * endS;
+    const endX = cw / 2 - n._sx * endS, endY = ch / 2 - n._sy * endS;
     const t0 = performance.now();
     const anim = (t) => {
       const p = Math.min(1, (t - t0) / 380);
@@ -146,68 +164,63 @@ class ForceGraph {
     const a = this.alpha;
     const R = this.sphereR;
 
-    // repulsion nhẹ hơn để giữ hình cầu (cutoff lớn hơn)
+    // 3D repulsion (cutoff lớn hơn để giữ hình cầu)
     for (let i = 0; i < vis.length; i++) {
       const A = vis[i];
       for (let j = i + 1; j < vis.length; j++) {
         const B = vis[j];
-        let dx = B.x - A.x, dy = B.y - A.y;
-        let d2 = dx * dx + dy * dy;
-        if (d2 < 1) { d2 = 1; dx = Math.random() - 0.5; dy = Math.random() - 0.5; }
-        if (d2 > 220000) continue;
+        let dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
+        let d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < 1) { d2 = 1; dx = Math.random() - 0.5; dy = Math.random() - 0.5; dz = Math.random() - 0.5; }
+        if (d2 > 260000) continue;
         const f = (kRep * a) / d2;
         const d = Math.sqrt(d2);
-        const fx = (dx / d) * f, fy = (dy / d) * f;
-        A.vx -= fx; A.vy -= fy;
-        B.vx += fx; B.vy += fy;
+        const fx = (dx / d) * f, fy = (dy / d) * f, fz = (dz / d) * f;
+        A.vx -= fx; A.vy -= fy; A.vz -= fz;
+        B.vx += fx; B.vy += fy; B.vz += fz;
       }
     }
-    // springs
+    // 3D springs
     for (const l of this.links) {
       const s = this.nodeById.get(typeof l.source === "string" ? l.source : l.source.id);
       const t = this.nodeById.get(typeof l.target === "string" ? l.target : l.target.id);
       if (!s || !t || !this.isVisible(s) || !this.isVisible(t)) continue;
       const targetLen = l.kind === "chunk_of" ? 36 : l.kind === "has_document" ? 88 : 72;
-      const dx = t.x - s.x, dy = t.y - s.y;
-      const d = Math.max(Math.sqrt(dx * dx + dy * dy), 0.01);
+      const dx = t.x - s.x, dy = t.y - s.y, dz = t.z - s.z;
+      const d = Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz), 0.01);
       const f = (kSpring * a * (d - targetLen));
-      const fx = (dx / d) * f, fy = (dy / d) * f;
-      s.vx += fx; s.vy += fy;
-      t.vx -= fx; t.vy -= fy;
+      const fx = (dx / d) * f, fy = (dy / d) * f, fz = (dz / d) * f;
+      s.vx += fx; s.vy += fy; s.vz += fz;
+      t.vx -= fx; t.vy -= fy; t.vz -= fz;
     }
-    // sphere constraint — kéo về vỏ cầu moon base + slow rotation
-    const rot = 0.00055 * a;
+    // sphere constraint 3D — kéo về vỏ cầu
     for (const n of vis) {
-      if (n.fixed && n !== this.dragNode) { n.vx = n.vy = 0; continue; }
-      const d = Math.sqrt(n.x * n.x + n.y * n.y) || 1;
-      // giữ trong cầu
+      if (n.fixed && n !== this.dragNode) { n.vx = n.vy = n.vz = 0; continue; }
+      const d = Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z) || 1;
       if (d > R * 1.02) {
         const pull = (d - R * 0.98) * 0.035 * a;
         n.vx -= (n.x / d) * pull;
         n.vy -= (n.y / d) * pull;
+        n.vz -= (n.z / d) * pull;
       } else if (this.sphereMode) {
         n.vx += -n.x * gravity * a * 0.45;
         n.vy += -n.y * gravity * a * 0.45;
+        n.vz += -n.z * gravity * a * 0.45;
       } else {
         n.vx += -n.x * gravity * a;
         n.vy += -n.y * gravity * a;
+        n.vz += -n.z * gravity * a;
       }
-      // xoay nhẹ quanh tâm (orbit)
-      if (this.sphereMode && a > 0.02 && !n.fixed) {
-        const ang = Math.atan2(n.y, n.x) + rot;
-        const rad = d;
-        const nx = Math.cos(ang) * rad;
-        const ny = Math.sin(ang) * rad;
-        n.vx += (nx - n.x) * 0.08;
-        n.vy += (ny - n.y) * 0.08;
-      }
-      n.x += Math.max(-22, Math.min(22, n.vx)) * damping;
-      n.y += Math.max(-22, Math.min(22, n.vy)) * damping;
-      n.vx *= damping; n.vy *= damping;
+      const cap = (v) => Math.max(-22, Math.min(22, v));
+      n.x += cap(n.vx) * damping;
+      n.y += cap(n.vy) * damping;
+      n.z += cap(n.vz) * damping;
+      n.vx *= damping; n.vy *= damping; n.vz *= damping;
     }
     if (this.dragNode) {
       this.dragNode.x = this.dragNode.fx;
       this.dragNode.y = this.dragNode.fy;
+      this.dragNode.z = this.dragNode.fz ?? this.dragNode.z;
     }
     this.alpha = Math.max(this.alpha - 0.007, 0);
   }
@@ -215,6 +228,11 @@ class ForceGraph {
   /* ── render ── */
   _frame() {
     if (this.alpha > 0.004) { this._step(); this._dirty = true; }
+    // auto-spin quả cầu khi không chọn node (dừng khi focus để đọc)
+    if (!this.selected && !this.dragNode && !this.rotating) {
+      this.rotY += 0.0016;
+      this._dirty = true;
+    }
     if (this._dirty) { this.render(); this._dirty = false; }
     requestAnimationFrame(() => this._frame());
   }
@@ -225,6 +243,11 @@ class ForceGraph {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cw, ch);
 
+    this._projectAll();
+    const vis = this.nodes.filter((n) => this.isVisible(n));
+    // painter's algorithm: vẽ từ xa tới gần
+    vis.sort((a, b) => a._depth - b._depth);
+
     ctx.save();
     ctx.translate(this.panX, this.panY);
     ctx.scale(this.scale, this.scale);
@@ -232,9 +255,8 @@ class ForceGraph {
     const focusId = this.hovered?.id || this.selected?.id || null;
     const near = focusId ? this.neighbors(focusId) : null;
 
-    // ——— MOON BASE SPHERE ——— (nền quả cầu như ảnh mẫu)
+    // ——— MOON BASE SPHERE 3D ———
     const R = this.sphereR;
-    // outer halo — làm rõ hơn
     const halo = ctx.createRadialGradient(0, 0, R * 0.62, 0, 0, R * 1.62);
     halo.addColorStop(0, "rgba(56,189,248,0.00)");
     halo.addColorStop(0.62, "rgba(56,189,248,0.08)");
@@ -244,7 +266,7 @@ class ForceGraph {
     halo.addColorStop(1, "rgba(2,15,31,0.0)");
     ctx.fillStyle = halo;
     ctx.beginPath(); ctx.arc(0, 0, R * 1.62, 0, Math.PI * 2); ctx.fill();
-    // main sphere body — lõi xanh thu nhỏ 0.5x
+    // main sphere body
     const sphereGrad = ctx.createRadialGradient(-R * 0.14, -R * 0.16, R * 0.11, 0, 0, R);
     sphereGrad.addColorStop(0, "#a5f3fc");
     sphereGrad.addColorStop(0.07, "#7dd3fc");
@@ -255,50 +277,63 @@ class ForceGraph {
     sphereGrad.addColorStop(1, "#020f1f");
     ctx.fillStyle = sphereGrad;
     ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill();
-    // subtle latitude/longitude grid (moon base)
-    ctx.strokeStyle = "rgba(56,189,248,0.06)"; ctx.lineWidth = 0.6;
+    // 3D wireframe: vĩ tuyến + kinh tuyến xoay theo rotY
+    ctx.strokeStyle = "rgba(56,189,248,0.07)"; ctx.lineWidth = 0.6;
     for (let k = 1; k <= 4; k++) {
       ctx.beginPath(); ctx.arc(0, 0, R * (k / 5), 0, Math.PI * 2); ctx.stroke();
     }
+    for (let k = 0; k < 4; k++) {
+      const a = this.rotY + (k * Math.PI) / 4;
+      const rx = Math.abs(Math.cos(a)) * R;
+      if (rx < 4) continue;
+      ctx.strokeStyle = "rgba(56,189,248,0.08)";
+      ctx.beginPath(); ctx.ellipse(0, 0, rx, R, 0, 0, Math.PI * 2); ctx.stroke();
+    }
     ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2);
     ctx.strokeStyle = "rgba(56,189,248,0.18)"; ctx.lineWidth = 1.1; ctx.stroke();
-    // terminator highlight (sun rim)
     ctx.strokeStyle = "rgba(255,255,255,0.09)"; ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.arc(0, 0, R, Math.PI * 0.62, Math.PI * 1.38); ctx.stroke();
 
-    // links — ultra-thin cyan web như ảnh (rất mờ)
+    // links — mờ dần theo độ sâu
     for (const l of this.links) {
       const s = this.nodeById.get(l.source), t = this.nodeById.get(l.target);
       if (!s || !t || !this.isVisible(s) || !this.isVisible(t)) continue;
+      const depth = Math.min(s._depth, t._depth);
       const isFocusEdge = focusId && (l.source === focusId || l.target === focusId);
+      const pcol = (l.kind === "belongs_to" || l.kind === "has_document")
+        ? (this.nodeById.get(l.kind === "belongs_to" ? l.target : l.source)?._pcol || null)
+        : null;
       ctx.beginPath();
-      ctx.moveTo(s.x, s.y);
-      const mx = (s.x + t.x) / 2, my = (s.y + t.y) / 2;
+      ctx.moveTo(s._sx, s._sy);
+      const mx = (s._sx + t._sx) / 2, my = (s._sy + t._sy) / 2;
       const curve = l.kind === "chunk_of" ? 7 : 0;
-      ctx.quadraticCurveTo(mx + curve, my - curve, t.x, t.y);
+      ctx.quadraticCurveTo(mx + curve, my - curve, t._sx, t._sy);
+      const back = 0.25 + 0.75 * depth; // node xa -> mờ
       if (focusId && !isFocusEdge) {
         ctx.strokeStyle = "rgba(56,90,110,0.08)";
         ctx.lineWidth = 0.35;
+      } else if (pcol && !isFocusEdge) {
+        ctx.strokeStyle = pcol + Math.round(34 * back).toString(16).padStart(2, "0");
+        ctx.lineWidth = 0.42;
       } else if (l.kind === "chunk_of") {
-        ctx.strokeStyle = isFocusEdge ? "rgba(251,146,60,0.55)" : "rgba(56,189,248,0.13)";
+        ctx.strokeStyle = isFocusEdge ? "rgba(251,146,60,0.55)" : `rgba(56,189,248,${0.13 * back})`;
         ctx.lineWidth = isFocusEdge ? 0.9 : 0.32;
       } else if (l.kind === "has_document") {
-        ctx.strokeStyle = isFocusEdge ? "rgba(167,139,250,0.65)" : "rgba(56,189,248,0.16)";
+        ctx.strokeStyle = isFocusEdge ? "rgba(167,139,250,0.65)" : `rgba(56,189,248,${0.16 * back})`;
         ctx.lineWidth = isFocusEdge ? 1.0 : 0.38;
       } else {
-        ctx.strokeStyle = isFocusEdge ? "rgba(165,243,252,0.62)" : "rgba(56,189,248,0.11)";
+        ctx.strokeStyle = isFocusEdge ? "rgba(165,243,252,0.62)" : `rgba(56,189,248,${0.11 * back})`;
         ctx.lineWidth = isFocusEdge ? 0.85 : 0.30;
       }
       ctx.stroke();
     }
 
-    // nodes
+    // nodes (đã sort xa -> gần)
     const showLabels = this.scale >= 0.62;
-    for (const n of this.nodes) {
-      if (!this.isVisible(n)) continue;
+    for (const n of vis) {
       const dimmed = focusId && n.id !== focusId && !near.has(n.id);
-      const r = this.radiusOf(n);
-      ctx.globalAlpha = dimmed ? 0.16 : 1;
+      const r = this.radiusOf(n) * n._ss;
+      ctx.globalAlpha = dimmed ? 0.16 : (0.38 + 0.62 * n._depth);
       this._drawShape(ctx, n, r);
 
       if (showLabels || n.kind === "project" || n === this.hovered || n === this.selected) {
@@ -309,7 +344,7 @@ class ForceGraph {
           ctx.fillStyle = dimmed ? "rgba(139,143,156,0.35)" : n === this.selected ? "#fff" : "#c8cad1";
           ctx.shadowColor = "rgba(0,0,0,0.9)";
           ctx.shadowBlur = 4;
-          ctx.fillText(label, n.x, n.y + r + 13);
+          ctx.fillText(label, n._sx, n._sy + r + 13);
           ctx.shadowBlur = 0;
         }
       }
@@ -319,7 +354,6 @@ class ForceGraph {
   }
 
   radiusOf(n) {
-    // moon base: tiny dots như ảnh — project hubs to hơn, còn lại li ti
     if (n.kind === "project") return 5.5 + Math.min(4, n.degree * 0.55);
     if (n.kind === "document") return 3.8 + Math.min(2.5, n.degree * 0.42);
     const base = 1.6 + (n.importance || 0.5) * 1.9;
@@ -327,27 +361,26 @@ class ForceGraph {
   }
 
   _drawShape(ctx, n, r) {
-    // MOON BASE — tiny luminous dots on sphere (như ảnh mẫu)
+    const px = n._sx, py = n._sy;
+    const pcol = n._pcol || null; // màu project (app.js gán)
     ctx.save();
     if (n.kind === "project") {
       const R = r * 1.15;
-      const col = "#a78bfa";
+      const col = pcol || "#a78bfa";
       ctx.shadowColor = col; ctx.shadowBlur = 14;
       ctx.fillStyle = col;
-      ctx.beginPath(); ctx.arc(n.x, n.y, R, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py, R, 0, Math.PI * 2); ctx.fill();
       ctx.shadowBlur = 0;
-      // inner bright core
       ctx.fillStyle = "#ffffff"; ctx.globalAlpha = 0.92;
-      ctx.beginPath(); ctx.arc(n.x - R * 0.18, n.y - R * 0.18, R * 0.32, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px - R * 0.18, py - R * 0.18, R * 0.32, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
       ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.arc(n.x, n.y, R, 0, Math.PI * 2); ctx.stroke();
-      // hub ring
-      ctx.strokeStyle = "rgba(167,139,250,0.28)"; ctx.lineWidth = 3.5;
-      ctx.beginPath(); ctx.arc(n.x, n.y, R + 3, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(px, py, R, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = col + "47"; ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.arc(px, py, R + 3, 0, Math.PI * 2); ctx.stroke();
       ctx.restore();
       if (n === this.hovered || n === this.selected) {
-        ctx.beginPath(); ctx.arc(n.x, n.y, R + 6, 0, Math.PI * 2);
+        ctx.beginPath(); ctx.arc(px, py, R + 6, 0, Math.PI * 2);
         ctx.strokeStyle = n === this.selected ? "#ffffffee" : col;
         ctx.lineWidth = n === this.selected ? 1.8 : 1.2; ctx.stroke();
       }
@@ -356,61 +389,64 @@ class ForceGraph {
     if (n.kind === "document") {
       const R = r * 1.1;
       const col = "#fb923c";
+      // halo màu project — nhận biết project ngay trên sphere
+      if (pcol) {
+        ctx.strokeStyle = pcol + "66"; ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.arc(px, py, R + 2.6, 0, Math.PI * 2); ctx.stroke();
+      }
       ctx.shadowColor = col + "aa"; ctx.shadowBlur = 10;
       ctx.fillStyle = col;
       ctx.beginPath();
-      ctx.moveTo(n.x, n.y - R);
-      ctx.lineTo(n.x + R, n.y);
-      ctx.lineTo(n.x, n.y + R);
-      ctx.lineTo(n.x - R, n.y);
+      ctx.moveTo(px, py - R);
+      ctx.lineTo(px + R, py);
+      ctx.lineTo(px, py + R);
+      ctx.lineTo(px - R, py);
       ctx.closePath(); ctx.fill();
       ctx.shadowBlur = 0;
       ctx.strokeStyle = "rgba(255,255,255,0.78)"; ctx.lineWidth = 0.9; ctx.stroke();
       ctx.restore();
       if (n === this.hovered || n === this.selected) {
-        ctx.beginPath(); ctx.arc(n.x, n.y, R + 5, 0, Math.PI * 2);
+        ctx.beginPath(); ctx.arc(px, py, R + 5, 0, Math.PI * 2);
         ctx.strokeStyle = n === this.selected ? "#ffffffee" : col;
         ctx.lineWidth = 1.2; ctx.stroke();
       }
       return;
     }
-    // memory — dot nhỏ màu theo type (đúng legend: semantic xanh, episodic xanh lá, decision hồng...)
+    // memory — lõi màu theo type + vành project
     const col = window.FSB_COLORS ? window.FSB_COLORS(n) : "#60a5fa";
-    // depth shading: nodes ở rìa tối hơn (dựa trên khoảng cách tới tâm)
-    const dist = Math.sqrt(n.x * n.x + n.y * n.y) / this.sphereR;
-    const dim = 0.88 + 0.12 * (1 - Math.min(1, dist));
+    if (pcol) {
+      ctx.strokeStyle = pcol + "55"; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(px, py, r + 2.2, 0, Math.PI * 2); ctx.stroke();
+    }
     ctx.shadowColor = col; ctx.shadowBlur = 6;
-    ctx.globalAlpha = 0.92 * dim + 0.08;
     ctx.fillStyle = col;
-    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
-    // specular highlight nhỏ
-    ctx.shadowBlur = 0; ctx.globalAlpha = 0.95 * dim;
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
     ctx.fillStyle = "#ffffff";
-    ctx.beginPath(); ctx.arc(n.x - r * 0.28, n.y - r * 0.28, r * 0.28, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.arc(px - r * 0.28, py - r * 0.28, r * 0.28, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 1;
     ctx.restore();
     if (n === this.hovered || n === this.selected) {
-      ctx.beginPath(); ctx.arc(n.x, n.y, r + 3.2, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(px, py, r + 3.2, 0, Math.PI * 2);
       ctx.strokeStyle = n === this.selected ? "#ffffffee" : col;
       ctx.lineWidth = n === this.selected ? 1.4 : 1.0; ctx.stroke();
     }
   }
 
   /* ── interaction ── */
-  _toWorld(evt) {
+  _toScreen(evt) {
     const rect = this.canvas.getBoundingClientRect();
-    return {
-      x: (evt.clientX - rect.left - this.panX) / this.scale,
-      y: (evt.clientY - rect.top - this.panY) / this.scale,
-    };
+    return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
   }
-  _pick(wx, wy) {
+  _pick(sx, sy) {
     let best = null, bestD = Infinity;
     for (const n of this.nodes) {
-      if (!this.isVisible(n)) continue;
-      const dx = n.x - wx, dy = n.y - wy;
+      if (!this.isVisible(n) || n._sx === undefined) continue;
+      const px = n._sx * this.scale + this.panX, py = n._sy * this.scale + this.panY;
+      const dx = px - sx, dy = py - sy;
       const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < Math.max(this.radiusOf(n) + 5, 12) && d < bestD) { best = n; bestD = d; }
+      if (d < Math.max(this.radiusOf(n) * n._ss * this.scale + 5, 12) && d < bestD) { best = n; bestD = d; }
     }
     return best;
   }
@@ -420,24 +456,43 @@ class ForceGraph {
     c.addEventListener("pointerdown", (e) => {
       c.setPointerCapture(e.pointerId);
       this._lastPointer = { x: e.clientX, y: e.clientY };
-      const w = this._toWorld(e);
-      const hit = this._pick(w.x, w.y);
+      const s = this._toScreen(e);
+      const hit = this._pick(s.x, s.y);
       if (hit) {
         this.dragNode = hit;
         hit.fixed = true;
-        hit.fx = hit.x; hit.fy = hit.y;
+        hit.fx = hit.x; hit.fy = hit.y; hit.fz = hit.z;
         this.reheat(0.35);
-      } else {
+      } else if (e.shiftKey) {
         this.panning = true;
+        c.classList.add("dragging");
+      } else {
+        this.rotating = true;
         c.classList.add("dragging");
       }
     });
     c.addEventListener("pointermove", (e) => {
-      const w = this._toWorld(e);
+      const s = this._toScreen(e);
       if (this.dragNode) {
-        this.dragNode.fx = w.x; this.dragNode.fy = w.y;
-        this.dragNode.x = w.x; this.dragNode.y = w.y;
+        // kéo node trên mặt phẳng màn hình (giữ z)
+        const dx = (e.clientX - this._lastPointer.x) / this.scale;
+        const dy = (e.clientY - this._lastPointer.y) / this.scale;
+        // đảo xoay Y để kéo đúng hướng nhìn
+        const cy = Math.cos(-this.rotY), sy = Math.sin(-this.rotY);
+        this.dragNode.fx = this.dragNode.x += (dx * cy) / (this.dragNode._ss || 1);
+        this.dragNode.fy = this.dragNode.y += dy / (this.dragNode._ss || 1);
+        this.dragNode.x = this.dragNode.fx;
+        this.dragNode.y = this.dragNode.fy;
+        this._lastPointer = { x: e.clientX, y: e.clientY };
         this.reheat(0.3);
+        this._dirty = true;
+        return;
+      }
+      if (this.rotating && this._lastPointer) {
+        // kéo nền = xoay quả cầu 3D (Shift+kéo = pan)
+        this.rotY += (e.clientX - this._lastPointer.x) * 0.005;
+        this.rotX = Math.max(-1.2, Math.min(1.2, this.rotX + (e.clientY - this._lastPointer.y) * 0.005));
+        this._lastPointer = { x: e.clientX, y: e.clientY };
         this._dirty = true;
         return;
       }
@@ -448,7 +503,7 @@ class ForceGraph {
         this._dirty = true;
         return;
       }
-      const hit = this._pick(w.x, w.y);
+      const hit = this._pick(s.x, s.y);
       if (hit !== this.hovered) {
         this.hovered = hit;
         c.style.cursor = hit ? "pointer" : "grab";
@@ -462,21 +517,25 @@ class ForceGraph {
         this.dragNode = null;
         this.reheat(0.18);
       }
-      if (this.panning) {
-        const moved = Math.abs(e.clientX - this._lastPointer.x) + Math.abs(e.clientY - this._lastPointer.y);
-        if (moved < 4) {
-          // click trống = bỏ chọn
+      if (this.rotating || this.panning) {
+        const moved = this._lastPointer
+          ? Math.abs(e.clientX - this._lastPointer.x) + Math.abs(e.clientY - this._lastPointer.y)
+          : 99;
+        // click trống = bỏ chọn (spin tự chạy lại)
+        if (moved < 400 && !this._pick(...(() => { const s = this._toScreen(e); return [s.x, s.y]; })())) {
           this.selected = null;
           this.handlers.onSelect?.(null);
           this._dirty = true;
         }
+        this.rotating = false;
         this.panning = false;
         c.classList.remove("dragging");
+        this._lastPointer = null;
         return;
       }
       // click node = chọn
-      const w = this._toWorld(e);
-      const hit = this._pick(w.x, w.y);
+      const s = this._toScreen(e);
+      const hit = this._pick(s.x, s.y);
       this.selected = hit || null;
       this.handlers.onSelect?.(hit || null);
       this._dirty = true;

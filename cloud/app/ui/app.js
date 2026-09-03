@@ -9,10 +9,36 @@ const TYPE_COLORS = {
 };
 const TYPE_ORDER = ["document","lesson","decision","episodic","semantic","task","procedural","preference"];
 window.FSB_COLORS = (n) => {
-  if (n.kind === "project") return "#a78bfa";
+  if (n.kind === "project") return n._pcol || "#a78bfa";
   if (n.kind === "document") return "#fb923c";
   return TYPE_COLORS[n.type] || "#94a3b8";
 };
+
+/* ─────────── per-project colors (3D graph) ─────────── */
+const PROJECT_PALETTE = ["#a78bfa","#22d3ee","#fbbf24","#f472b6","#34d399","#fb923c","#60a5fa","#e879f9","#a3e635","#f87171","#2dd4bf","#facc15"];
+const projectColorMap = new Map(); // "p:<uuid>" -> hex (giữ ổn định giữa các lần reload)
+function assignProjectColors(nodes) {
+  const order = [];
+  for (const n of nodes) {
+    if (n.kind === "project" && !order.includes(n.id)) order.push(n.id);
+  }
+  for (const n of nodes) {
+    const pid = n.project_id ? `p:${n.project_id}` : null;
+    if (pid && !order.includes(pid)) order.push(pid);
+  }
+  for (const pid of order) {
+    if (!projectColorMap.has(pid)) {
+      projectColorMap.set(pid, PROJECT_PALETTE[projectColorMap.size % PROJECT_PALETTE.length]);
+    }
+  }
+  const names = {};
+  for (const n of nodes) if (n.kind === "project") names[n.id] = n.label;
+  for (const n of nodes) {
+    const pid = n.kind === "project" ? n.id : (n.project_id ? `p:${n.project_id}` : null);
+    n._pcol = pid ? (projectColorMap.get(pid) || null) : null;
+    n._pname = pid ? (names[pid] || pid.slice(2, 10)) : null;
+  }
+}
 
 const state = {
   apiKey: localStorage.getItem("fsb.apiKey") || "",
@@ -306,6 +332,32 @@ function buildTypeFilterChips(nodes) {
     });
     wrap.appendChild(chip);
   }
+  // legend project — màu riêng từng project trên graph 3D
+  const projRows = [];
+  const seenPid = new Set();
+  for (const n of nodes) {
+    const pid = n.kind === "project" ? n.id : (n.project_id ? `p:${n.project_id}` : null);
+    if (!pid || seenPid.has(pid)) continue;
+    seenPid.add(pid);
+    const col = projectColorMap.get(pid);
+    if (!col) continue;
+    const memberCount = nodes.filter((m) => (m.kind === "project" ? m.id : (m.project_id ? `p:${m.project_id}` : null)) === pid).length;
+    const nm = n.kind === "project" ? n.label : (n._pname || pid.slice(2, 10));
+    projRows.push({ pid, col, nm, memberCount });
+  }
+  if (projRows.length) {
+    const head = document.createElement("div");
+    head.style.cssText = "margin-top:10px;font-size:10px;letter-spacing:.08em;color:var(--muted)";
+    head.textContent = "PROJECT (màu riêng)";
+    wrap.appendChild(head);
+    for (const r of projRows) {
+      const row = document.createElement("div");
+      row.className = "type-chip";
+      row.title = `${r.nm} — ${r.memberCount} nodes`;
+      row.innerHTML = `<span class="swatch" style="background:${r.col};box-shadow:0 0 6px ${r.col}66"></span>${esc(r.nm.length > 18 ? r.nm.slice(0, 17) + "…" : r.nm)} <small style="color:${r.col}">${r.memberCount}</small>`;
+      wrap.appendChild(row);
+    }
+  }
 }
 
 /* ─────────── detail panel ─────────── */
@@ -313,6 +365,11 @@ engine = new ForceGraph($("#graph"), {
   onSelect: (node) => { renderDetail(node); },
   onHover: (node) => renderTooltip(node),
 });
+// tự gán màu project mỗi khi engine nhận data (mọi đường: loadGraph, lọc project...)
+{
+  const _origSetData = engine.setData.bind(engine);
+  engine.setData = (nodes, links) => { assignProjectColors(nodes); _origSetData(nodes, links); };
+}
 
 let lastPointerClient = { x: 0, y: 0 };
 $("#graph").addEventListener("pointermove", (e) => { lastPointerClient = { x: e.clientX, y: e.clientY }; });
