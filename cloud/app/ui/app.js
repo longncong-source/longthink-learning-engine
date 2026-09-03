@@ -944,9 +944,9 @@ function addFolderFiles(list) {
     folderState.files.push({ file: f, rel });
   }
   if (skipped) toast(`Bỏ qua ${skipped} file (sai định dạng/quá ${MAX_MB}MB)`, true);
-  if (folderState.files.length > 100) {
-    folderState.files = folderState.files.slice(0, 100);
-    toast("Giới hạn 100 file/lần — chia nhỏ thư mục", true);
+  if (folderState.files.length > 2000) {
+    folderState.files = folderState.files.slice(0, 2000);
+    toast("Giới hạn 2000 file/lần — chia nhỏ thư mục", true);
   }
   renderFolderTree();
 }
@@ -963,43 +963,59 @@ $("#btn-folder-upload")?.addEventListener("click", async () => {
   if (!folderState.files.length) return;
   localStorage.setItem("fsb.folderProject", pid);
 
-  const fd = new FormData();
-  for (const f of folderState.files) fd.append("files", f.file, f.file.name);
-  fd.append("paths", JSON.stringify(folderState.files.map((f) => f.rel)));
-  fd.append("project_id", pid);
-  const rootGuess = folderState.files[0].rel.split("/")[0] || "";
-  fd.append("root", $("#folder-root").value.trim() || rootGuess);
+  const FOLDER_BATCH = 100; // backend cap/request — tự chia lô tới khi hết
+  const all = [...folderState.files];
+  const batches = Math.ceil(all.length / FOLDER_BATCH);
+  const rootGuess = all[0].rel.split("/")[0] || "";
+  const root = $("#folder-root").value.trim() || rootGuess;
 
   const btn = $("#btn-folder-upload"), summary = $("#folder-summary");
   btn.disabled = true;
-  summary.textContent = `⏳ đang upload ${folderState.files.length} file giữ cây thư mục…`;
   summary.className = "write-result";
-  setProgressFor($("#folder-progress"), 0.3);
   setWidgetState("first", "processing", "Ingesting folder…");
+  let done = 0, okTotal = 0, failTotal = 0, chunkTotal = 0;
+  const errSamples = [];
   try {
-    const res = await fetch(`${cfg.base}/v1/documents/upload-folder`, {
-      method: "POST",
-      headers: { "X-API-Key": cfg.key },
-      body: fd,
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${body?.error?.message || ""}`.trim());
+    for (let b = 0; b < batches; b++) {
+      const slice = all.slice(b * FOLDER_BATCH, (b + 1) * FOLDER_BATCH);
+      summary.textContent = `⏳ lô ${b + 1}/${batches}: đang upload ${slice.length} file (đã xong ${done}/${all.length})…`;
+      setProgressFor($("#folder-progress"), done / all.length);
+      const fd = new FormData();
+      for (const f of slice) fd.append("files", f.file, f.file.name);
+      fd.append("paths", JSON.stringify(slice.map((f) => f.rel)));
+      fd.append("project_id", pid);
+      fd.append("root", root);
+      const res = await fetch(`${cfg.base}/v1/documents/upload-folder`, {
+        method: "POST",
+        headers: { "X-API-Key": cfg.key },
+        body: fd,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(`lô ${b + 1}: HTTP ${res.status} ${body?.error?.message || ""}`.trim());
+      done += slice.length;
+      okTotal += body.succeeded || 0;
+      failTotal += body.failed || 0;
+      chunkTotal += body.total_chunks || 0;
+      for (const i of (body.items || [])) {
+        if (i.error && errSamples.length < 5) errSamples.push(`${i.path}: ${i.error}`);
+      }
+      setProgressFor($("#folder-progress"), done / all.length);
+    }
     setProgressFor($("#folder-progress"), 1);
     summary.textContent =
-      `✅ Xong: ${body.succeeded}/${body.total_files} file (${body.total_chunks} chunk) → project` +
-      (body.failed ? `, ${body.failed} lỗi` : "");
-    summary.className = `write-result ${body.failed && !body.succeeded ? "err" : "ok"}`;
-    const errs = (body.items || []).filter((i) => i.error).slice(0, 5);
-    if (errs.length) summary.textContent += " — lỗi: " + errs.map((i) => `${i.path}: ${i.error}`).join("; ");
-    if (body.succeeded) {
+      `✅ Xong: ${okTotal}/${all.length} file (${chunkTotal} chunk, ${batches} lô) → project` +
+      (failTotal ? `, ${failTotal} lỗi` : "");
+    summary.className = `write-result ${failTotal && !okTotal ? "err" : "ok"}`;
+    if (errSamples.length) summary.textContent += " — lỗi: " + errSamples.join("; ");
+    if (okTotal) {
       folderState.files = [];
       renderFolderTree();
       if (uploadState.target === "local") await Promise.all([loadGraph(), loadStatus()]);
-      toast(`📁 Đã nạp thư mục: ${body.succeeded} file vào project`);
+      toast(`📁 Đã nạp thư mục: ${okTotal} file (${batches} lô) vào project`);
     }
     setWidgetState("first", "success", "Success ✓");
   } catch (e) {
-    summary.textContent = "❌ " + e.message;
+    summary.textContent = `❌ Dừng ở ${done}/${all.length} file: ` + e.message;
     summary.className = "write-result err";
     toast("Upload thư mục lỗi: " + e.message, true);
   } finally {
