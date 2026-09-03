@@ -29,7 +29,7 @@ DOMAINS: list[dict[str, Any]] = [
     {"key": "contract", "label": "CONTRACT", "types": set(), "kts": {"contract"}},
     {"key": "method", "label": "METHOD", "types": {"procedural"}, "kts": {"method"}},
     {"key": "site", "label": "SITE", "types": set(), "kts": {"site"}},
-    {"key": "document", "label": "DOCUMENT", "types": {"document"}, "kts": set()},
+    {"key": "document", "label": "DOCUMENT", "types": {"document"}, "kts": {"document"}},
     {"key": "lesson", "label": "LESSON", "types": {"lesson"}, "kts": {"lesson"}},
 ]
 

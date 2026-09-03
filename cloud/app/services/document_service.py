@@ -22,6 +22,7 @@ from cloud.app.errors import NotFoundError, PayloadTooLargeError
 from cloud.app.metrics import inc as metric_inc
 from cloud.app.services.audit_service import record as audit_record
 from cloud.app.services.chunker import chunk_page_text, estimate_tokens
+from cloud.app.services.classify import classify_knowledge_type
 from cloud.app.services.extract import extract_pages
 
 
@@ -64,6 +65,8 @@ def ingest_document(
 
     extraction = extract_pages(filename, data)
     display_title = (title or filename)[:300]
+    # Auto-recognition: file mới tự gắn knowledge_type -> ONE VECTOR PLATFORM.
+    knowledge_type = classify_knowledge_type(filename, source)
 
     document = repository.create_document(
         DocumentRecord(
@@ -95,6 +98,7 @@ def ingest_document(
                         "filename": filename,
                         "page": page.number,
                         "chunk_index": chunks_indexed,
+                        **({"knowledge_type": knowledge_type} if knowledge_type else {}),
                     },
                     project_id=project_id,
                     embedding=vector,
