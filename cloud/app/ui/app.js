@@ -274,11 +274,6 @@ async function fetchPlatform() {
   try {
     const p = await api("/v1/memory/knowledge-domains");
     state.platform = p;
-    const badge = $("#vp-backend");
-    if (badge) {
-      const short = String(p.backend || "").replace(/^postgres\+?/i, "").toUpperCase() || "?";
-      badge.textContent = `${short} · ${p.embedding_dimension}D · ${p.total_memories.toLocaleString("en-US")}`;
-    }
     return p;
   } catch (e) {
     return null;
