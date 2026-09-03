@@ -86,6 +86,9 @@ if (Test-Path $localEnv) {
 }
 
 # 3. Start API if not running
+# Forced OpenCode creds — must match D:\OPENCODE_WEB_HIDDEN.bat (:4096)
+$env:OPENCODE_SERVER_USERNAME = "opencode"
+$env:OPENCODE_SERVER_PASSWORD = "9de63327-5314-44f7-8525-63a1d4225e82"
 if (Test-API) {
     Write-Host "[API] Already running at http://127.0.0.1:8100" -ForegroundColor Green
 } else {
