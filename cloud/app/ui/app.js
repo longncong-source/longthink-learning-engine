@@ -391,9 +391,9 @@ async function buildTypeFilterChips(nodes) {
       row.className = "vp-row" + (total === 0 ? " vp-empty" : "") + (off ? " off" : "");
       const detail = Object.entries(info.memory_types || {}).map(([k, v]) => `${k}:${v}`).join(" ") || "chưa có dữ liệu";
       row.title = `${g.label} — ${total} memories [${detail}] (click để lọc graph)`;
-      row.innerHTML = `<span class="vp-branch">${last ? "└──" : "├──"}</span>`
-        + `<span class="dot ${total > 0 ? "green" : "amber"}"></span>`
+      row.innerHTML = `<span class="dot ${total > 0 ? "green" : "amber"}"></span>`
         + `<span class="vp-label">${g.label}</span><b class="vp-count">${total.toLocaleString("en-US")}</b>`;
+      if (last) row.classList.add("vp-last");
       if (types.length && total > 0) {
         row.style.cursor = "pointer";
         row.addEventListener("click", () => toggleDomainTypes(types));
