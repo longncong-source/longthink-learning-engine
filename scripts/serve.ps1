@@ -1,4 +1,4 @@
-# Start the Second Brain API on :8100 (SQLite mode). No-op if already running.
+# Start the Second Brain API on :8100 (backend from cloud/.env: postgres+pgvector or sqlite). No-op if already running.
 param([int]$Port = 8100)
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root

@@ -6,6 +6,36 @@ Set-Location $root
 
 Write-Host "=== LongThink Learning Engine - Auto Start ===" -ForegroundColor Cyan
 
+# 0. Ensure Postgres+pgvector (fsb-db :5433) when MEMORY_DB_BACKEND=postgres
+try {
+    $cloudEnvRaw = ""
+    $cloudEnvPath = Join-Path $root "cloud\.env"
+    if (Test-Path $cloudEnvPath) { $cloudEnvRaw = Get-Content $cloudEnvPath -Raw }
+    if ($cloudEnvRaw -match "MEMORY_DB_BACKEND=postgres") {
+        $pgUp = $false
+        try {
+            & ".\.venv\Scripts\python.exe" -c "import psycopg; psycopg.connect('postgresql://second_brain:second_brain@localhost:5433/second_brain', connect_timeout=3).close()" 2>$null
+            if ($LASTEXITCODE -eq 0) { $pgUp = $true }
+        } catch {}
+        if (-not $pgUp) {
+            Write-Host "[PG] Starting fsb-db (pgvector :5433)..." -ForegroundColor Cyan
+            try {
+                docker compose -f docker-compose.brain.yml up -d fsb-db 2>&1 | Select-Object -Last 2 | Out-Host
+                $deadline = (Get-Date).AddMinutes(2)
+                while ((Get-Date) -lt $deadline -and -not $pgUp) {
+                    Start-Sleep -Seconds 3
+                    try {
+                        & ".\.venv\Scripts\python.exe" -c "import psycopg; psycopg.connect('postgresql://second_brain:second_brain@localhost:5433/second_brain', connect_timeout=3).close()" 2>$null
+                        if ($LASTEXITCODE -eq 0) { $pgUp = $true }
+                    } catch {}
+                }
+            } catch { Write-Host "[PG] docker unavailable: $_" -ForegroundColor Yellow }
+        }
+        if ($pgUp) { Write-Host "[PG] online :5433 (pgvector)" -ForegroundColor Green }
+        else { Write-Host "[PG] NOT reachable - API may fail (MEMORY_DB_BACKEND=postgres)" -ForegroundColor Red }
+    }
+} catch { Write-Host "[PG] skip: $_" -ForegroundColor Yellow }
+
 # Function to check if Ollama is running
 function Test-Ollama {
     try {

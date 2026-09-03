@@ -203,7 +203,7 @@ async function loadStatus() {
       `<span class="dot ${emb.reachable ? "green" : "red"}"></span>` +
       `<span>${emb.provider}:${esc(emb.model)} (${emb.dimension}d)</span>`;
     $("#sb-backend").textContent = `api · ${s.backend} · ${emb.provider}`;
-    $("#node-second").className = `bridge-node cloud ${s.backend==="postgres"?"online":""}`;
+    $("#node-second").className = `bridge-node cloud ${String(s.backend||"").startsWith("postgres")?"online":""}`;
     $("#pill-counts").textContent =
       `${s.counts.memories} memories · ${s.counts.documents} docs · ${s.counts.projects} projects`;
 
