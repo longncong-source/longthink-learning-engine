@@ -45,6 +45,18 @@ class ForceGraph {
     this.rotX = 0.32; // fixed tilt + drag
     this.focal = 1150; // perspective focal length (world units)
 
+    // neural-network life
+    this._t = 0; // animation clock (seconds)
+    this._stars = [];
+    for (let i = 0; i < 110; i++) {
+      this._stars.push({
+        x: Math.random(), y: Math.random(),
+        r: 0.4 + Math.random() * 1.1,
+        ph: Math.random() * Math.PI * 2,
+        sp: 0.4 + Math.random() * 1.4,
+      });
+    }
+
     this._bind();
     this._resize();
     new ResizeObserver(() => this._resize()).observe(canvas.parentElement);
@@ -81,6 +93,27 @@ class ForceGraph {
       const t = typeof l.target === "string" ? l.target : l.target.id;
       return ids.has(s) && ids.has(t);
     });
+    // sibling synapse — nối memory cùng project/dữ liệu thành mạng neuron
+    // (mỗi memory nối tối đa 2 node cùng nhóm, lò xo yếu, render mờ)
+    {
+      const groups = new Map();
+      for (const n of this.nodes) {
+        if (n.kind !== "memory") continue;
+        const g = n.project_id ? `p:${n.project_id}` : "none";
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(n.id);
+      }
+      for (const arr of groups.values()) {
+        arr.sort();
+        for (let i = 0; i < arr.length; i++) {
+          for (let k = 1; k <= 2; k++) {
+            const j = i + k;
+            if (j >= arr.length) break;
+            this.links.push({ source: arr[i], target: arr[j], kind: "sibling" });
+          }
+        }
+      }
+    }
     this._index();
     this.reheat(0.85);
     if (!prev.size) setTimeout(() => this.fitView(110), 620);
@@ -185,7 +218,7 @@ class ForceGraph {
       const s = this.nodeById.get(typeof l.source === "string" ? l.source : l.source.id);
       const t = this.nodeById.get(typeof l.target === "string" ? l.target : l.target.id);
       if (!s || !t || !this.isVisible(s) || !this.isVisible(t)) continue;
-      const targetLen = l.kind === "chunk_of" ? 36 : l.kind === "has_document" ? 88 : 72;
+      const targetLen = l.kind === "chunk_of" ? 36 : l.kind === "has_document" ? 88 : l.kind === "sibling" ? 120 : 72;
       const dx = t.x - s.x, dy = t.y - s.y, dz = t.z - s.z;
       const d = Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz), 0.01);
       const f = (kSpring * a * (d - targetLen));
@@ -233,6 +266,11 @@ class ForceGraph {
       this.rotY += 0.0016;
       this._dirty = true;
     }
+    // mạng neuron luôn sống: xung + thở cần vẽ mỗi frame
+    if (this.nodes.length) {
+      this._t += 1 / 60;
+      this._dirty = true;
+    }
     if (this._dirty) { this.render(); this._dirty = false; }
     requestAnimationFrame(() => this._frame());
   }
@@ -242,6 +280,15 @@ class ForceGraph {
     const cw = this.canvas.width / dpr, ch = this.canvas.height / dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cw, ch);
+
+    // starfield nền — nhấp nháy nhẹ
+    for (const st of this._stars) {
+      const tw = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(this._t * st.sp + st.ph));
+      ctx.globalAlpha = tw * 0.5;
+      ctx.fillStyle = "#bae6fd";
+      ctx.beginPath(); ctx.arc(st.x * cw, st.y * ch, st.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
 
     this._projectAll();
     const vis = this.nodes.filter((n) => this.isVisible(n));
@@ -328,11 +375,41 @@ class ForceGraph {
       ctx.stroke();
     }
 
-    // nodes (đã sort xa -> gần)
+    // neural pulses — xung điện chạy dọc synapse (giới hạn để giữ fps)
+    {
+      const maxP = this.nodes.length > 800 ? 220 : 420;
+      const step = Math.max(1, Math.floor(this.links.length / maxP));
+      let pi = 0;
+      for (let li = 0; li < this.links.length; li += step) {
+        const l = this.links[li];
+        const s = this.nodeById.get(l.source), t = this.nodeById.get(l.target);
+        if (!s || !t || !this.isVisible(s) || !this.isVisible(t)) continue;
+        if (focusId && l.source !== focusId && l.target !== focusId) continue;
+        const speed = 0.12 + (pi % 5) * 0.03;
+        const off = (this._t * speed + (pi * 0.61803)) % 1;
+        const px = s._sx + (t._sx - s._sx) * off;
+        const py = s._sy + (t._sy - s._sy) * off;
+        const pcol = s._pcol || t._pcol || "#67e8f9";
+        const pr = (1.1 + (s._depth + t._depth) * 0.9) * (0.8 + 0.4 * Math.sin(this._t * 6 + pi));
+        ctx.save();
+        ctx.globalAlpha = 0.35 + 0.55 * Math.min(s._depth, t._depth);
+        ctx.shadowColor = pcol; ctx.shadowBlur = 9;
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath(); ctx.arc(px, py, pr * 0.55, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = pcol;
+        ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        pi++;
+      }
+    }
+
+    // nodes (đã sort xa -> gần) — neuron thở theo nhịp
     const showLabels = this.scale >= 0.62;
     for (const n of vis) {
       const dimmed = focusId && n.id !== focusId && !near.has(n.id);
-      const r = this.radiusOf(n) * n._ss;
+      const breathe = 1 + 0.07 * Math.sin(this._t * 2.1 + (n._depth * 6.28) + n.x * 0.01);
+      const r = this.radiusOf(n) * n._ss * breathe;
       ctx.globalAlpha = dimmed ? 0.16 : (0.38 + 0.62 * n._depth);
       this._drawShape(ctx, n, r);
 
@@ -349,6 +426,21 @@ class ForceGraph {
         }
       }
       ctx.globalAlpha = 1;
+    }
+    // ripple quanh node đang chọn — tín hiệu lan tỏa
+    if (this.selected && this.selected._sx !== undefined) {
+      const sn = this.selected;
+      for (let k = 0; k < 2; k++) {
+        const ph = ((this._t * 0.7 + k * 0.5) % 1);
+        ctx.save();
+        ctx.globalAlpha = (1 - ph) * 0.5;
+        ctx.strokeStyle = sn._pcol || "#ffffff";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(sn._sx, sn._sy, (this.radiusOf(sn) * sn._ss + 6) + ph * 26, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
     ctx.restore();
   }
