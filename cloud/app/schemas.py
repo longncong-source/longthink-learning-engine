@@ -161,6 +161,7 @@ class DocumentOut(BaseModel):
 class DocumentIngestResponse(BaseModel):
     document: DocumentOut
     chunks_indexed: int
+    deduplicated: bool = False
 
 
 class DocumentChunkOut(BaseModel):

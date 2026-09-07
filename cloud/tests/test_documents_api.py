@@ -190,3 +190,28 @@ class TestUploadFolder:
         files = [("files", ("a.md", b"data", "text/markdown"))]
         resp = client.post("/v1/documents/upload-folder", files=files, data={"paths": json.dumps(["a.md"])})
         assert resp.status_code == 401
+
+
+class TestIdempotentIngest:
+    def test_reupload_same_bytes_dedupes(self, client):  # type: ignore[no-untyped-def]
+        first = _upload(client, name="idem.md").json()
+        assert first.get("deduplicated") is not True
+        second = _upload(client, name="idem.md")
+        assert second.status_code == 201
+        body = second.json()
+        assert body["deduplicated"] is True
+        assert body["document"]["id"] == first["document"]["id"]
+        assert body["chunks_indexed"] == first["chunks_indexed"]
+        # No new memories mirrored on re-ingest.
+        found = client.post(
+            "/v1/memory/search", json={"query": "Mechanical Package", "top_k": 50},
+            headers=AUTH_HEADERS,
+        ).json()
+        assert found["total"] == 1
+
+    def test_same_name_new_bytes_reingests(self, client):  # type: ignore[no-untyped-def]
+        first = _upload(client, name="evolving.md").json()
+        second = _upload(client, name="evolving.md", data=SAMPLE_MD + b"\n\nExtra paragraph added.")
+        body = second.json()
+        assert body.get("deduplicated") is not True
+        assert body["document"]["id"] != first["document"]["id"]

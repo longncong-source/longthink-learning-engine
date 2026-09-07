@@ -89,6 +89,16 @@ class Settings(BaseSettings):
     mid_brain_obsidian_vault_path: str = ""
     mid_brain_confidence_threshold: float = 0.62
 
+    # Voice: 2-way speech for LongThink (STT whisper cloud + TTS edge vi cloud).
+    # Cloud path by design - requires DATA_POLICY=cloud_allowed on the caller side.
+    voice_stt_provider: Literal["openai"] = "openai"
+    voice_stt_model: str = "whisper-1"
+    voice_stt_language: str = "vi"
+    voice_tts_provider: Literal["edge"] = "edge"
+    voice_tts_voice: str = "vi-VN-HoaiMyNeural"
+    voice_max_audio_mb: int = 15
+    voice_max_answer_chars: int = 1200
+
     @property
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.memory_api_keys.split(",") if k.strip()]

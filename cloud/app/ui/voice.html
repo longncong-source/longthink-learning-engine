@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LongThink Voice - Hỏi bằng giọng nói</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, "Segoe UI", sans-serif; background: #0b1020; color: #e6ebf5; margin: 0; padding: 24px; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #8fa0bd; font-size: 13px; margin-bottom: 20px; }
+  .mic { width: 120px; height: 120px; border-radius: 50%; border: 3px solid #38bdf8; background: #10233d; color: #fff; font-size: 48px; cursor: pointer; display: block; margin: 12px auto; }
+  .mic.rec { border-color: #fb7185; background: #3d1020; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 16px rgba(251,113,133,.15); } }
+  .row { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+  input, select, button.btn { background: #131c33; color: #e6ebf5; border: 1px solid #2a3a5c; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+  button.btn { cursor: pointer; }
+  .card { background: #101830; border: 1px solid #22314f; border-radius: 12px; padding: 14px; margin-top: 12px; }
+  .label { font-size: 12px; color: #8fa0bd; text-transform: uppercase; letter-spacing: .06em; }
+  #q, #a { white-space: pre-wrap; margin-top: 6px; }
+  #status { min-height: 20px; color: #7dd3fc; font-size: 13px; text-align: center; }
+  audio { width: 100%; margin-top: 8px; }
+  a { color: #7dd3fc; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎙️ LongThink Voice</h1>
+  <div class="sub">Nhấn giữ nút mic, nói câu hỏi tiếng Việt, thả ra — LongThink trả lời bằng giọng nói. <a href="/ui/">← về dashboard</a></div>
+  <button id="mic" class="mic" title="Nhấn để nói">🎙️</button>
+  <div id="status">Sẵn sàng</div>
+  <div class="row">
+    <input id="key" type="password" placeholder="X-API-Key (lưu local)" style="flex:2;min-width:200px">
+    <select id="voice"><option value="">Giọng mặc định</option></select>
+    <button class="btn" id="save">Lưu key</button>
+  </div>
+  <div class="card"><div class="label">Bạn hỏi</div><div id="q">—</div></div>
+  <div class="card"><div class="label">LongThink trả lời</div><div id="a">—</div><audio id="player" controls></audio></div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const keyInput = $("#key"), micBtn = $("#mic"), statusEl = $("#status");
+keyInput.value = localStorage.getItem("fsb.apiKey") || "";
+$("#save").onclick = () => { localStorage.setItem("fsb.apiKey", keyInput.value.trim()); toast("Đã lưu key"); };
+function toast(m) { statusEl.textContent = m; }
+async function loadVoices() {
+  const key = localStorage.getItem("fsb.apiKey") || "";
+  if (!key) return;
+  try {
+    const r = await fetch("/v1/voice/voices", { headers: { "X-API-Key": key } });
+    if (!r.ok) return;
+    const j = await r.json();
+    const sel = $("#voice");
+    Object.entries(j.voices || {}).forEach(([id, name]) => {
+      const o = document.createElement("option"); o.value = id; o.textContent = name + (id === j.default ? " (mặc định)" : ""); sel.appendChild(o);
+    });
+  } catch (e) { /* offline */ }
+}
+loadVoices();
+let recorder = null, chunks = [];
+micBtn.onclick = async () => {
+  const key = (localStorage.getItem("fsb.apiKey") || "").trim();
+  if (!key) { toast("Nhập X-API-Key trước"); return; }
+  if (recorder) { recorder.stop(); return; } // thả = dừng, gửi
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chunks = [];
+    recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "" });
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      micBtn.classList.remove("rec"); micBtn.textContent = "🎙️";
+      const r = recorder; recorder = null;
+      await sendVoice(new Blob(chunks, { type: r.mimeType || "audio/webm" }), key);
+    };
+    recorder.start();
+    micBtn.classList.add("rec"); micBtn.textContent = "⏹️";
+    toast("Đang nghe… nhấn lần nữa để gửi");
+  } catch (e) { toast("Không mở được mic: " + e.message); }
+};
+async function sendVoice(blob, key) {
+  if (!blob.size) { toast("Chưa thu được tiếng"); return; }
+  toast("Đang hỏi LongThink…");
+  $("#q").textContent = "…"; $("#a").textContent = "…";
+  const fd = new FormData();
+  fd.append("audio", blob, "mic.webm");
+  const v = $("#voice").value; if (v) fd.append("voice", v);
+  try {
+    const r = await fetch("/v1/voice/ask", { method: "POST", headers: { "X-API-Key": key }, body: fd });
+    const j = await r.json();
+    if (!r.ok) { toast("Lỗi: " + ((j.error && j.error.message) || r.status)); return; }
+    $("#q").textContent = j.question;
+    $("#a").textContent = j.answer + `\n\n(${j.memories_used} memories đã dùng)`;
+    const player = $("#player");
+    player.src = "data:audio/mpeg;base64," + j.audio_base64;
+    player.play().catch(() => {});
+    toast("Xong ✅");
+  } catch (e) { toast("Lỗi mạng: " + e.message); }
+}
+</script>
+</body>
+</html>

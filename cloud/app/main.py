@@ -21,7 +21,7 @@ from cloud.app import metrics
 from cloud.app.config import get_settings
 from cloud.app.db import get_repository, reset_repository
 from cloud.app.errors import DomainError, RateLimitError
-from cloud.app.routers import admin, code, comfy, documents, graph, health, lmstudio, memories, mid_brain, obsidian, odc, projects
+from cloud.app.routers import admin, code, comfy, documents, graph, health, lmstudio, memories, mid_brain, obsidian, odc, projects, voice
 from cloud.app.routers import code_proxy, odc_proxy
 from cloud.app.security import RateLimiter, client_identity
 from cloud.app.services import audit_service
@@ -199,6 +199,7 @@ def create_app() -> FastAPI:
     app.include_router(code.router)
     app.include_router(lmstudio.router)
     app.include_router(odc.router)
+    app.include_router(voice.router)
     # Proxy OpenCode Web :4096 -> :8100/code/*  (auth handled server-side, no login popup in iframe)
     @app.api_route("/code/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
     async def _code_proxy(request: Request, path: str):

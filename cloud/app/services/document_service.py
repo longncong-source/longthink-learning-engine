@@ -7,6 +7,7 @@ type="document" memory so the existing hybrid search serves RAG out of the box.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from cloud.app.config import Settings, get_settings
@@ -63,6 +64,24 @@ def ingest_document(
     if project_id and repository.get_project(project_id) is None:
         raise NotFoundError(f"Project {project_id} does not exist")
 
+    # Idempotent ingest: same filename + same bytes -> reuse, never duplicate.
+    # (Watcher re-scans touch mtimes; without this every rescan doubles memories.)
+    content_sha = hashlib.sha256(data).hexdigest()
+    for existing in repository.list_documents(limit=200, project_id=project_id, query=filename):
+        meta = existing.metadata or {}
+        if existing.filename == filename and meta.get("content_sha256") == content_sha:
+            chunks = repository.list_document_chunks(existing.id, limit=5000)
+            audit_record(
+                "document.ingest",
+                result_count=0,
+                detail={"filename": filename, "deduplicated": True},
+            )
+            return {
+                "document": document_to_dict(existing),
+                "chunks_indexed": len(chunks),
+                "deduplicated": True,
+            }
+
     extraction = extract_pages(filename, data)
     display_title = (title or filename)[:300]
     # Auto-recognition: file mới tự gắn knowledge_type -> ONE VECTOR PLATFORM.
@@ -76,6 +95,7 @@ def ingest_document(
             mime_type=extraction.mime_type,
             metadata={
                 "pages": extraction.meta.get("pages"),
+                "content_sha256": content_sha,
                 **({"knowledge_type": knowledge_type} if knowledge_type else {}),
             },
             project_id=project_id,

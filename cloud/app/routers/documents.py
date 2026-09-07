@@ -58,6 +58,7 @@ def upload_document(
     return DocumentIngestResponse(
         document=DocumentOut(**result["document"]),
         chunks_indexed=result["chunks_indexed"],
+        deduplicated=bool(result.get("deduplicated")),
     )
 
 
