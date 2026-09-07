@@ -209,6 +209,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     checks.append(("pending write queue empty", None if pending else True,
                    f"{pending} item(s) - run 'brain sync'"))
 
+    openclaw_warn = settings.openclaw_integration_warning
+    if openclaw_warn:
+        checks.append(("openclaw integration configured", None, openclaw_warn))
+    elif settings.second_brain_provider == "openclaw" and settings.openclaw_configured:
+        checks.append(("openclaw integration configured", True,
+                       f"OPENCLAW_BASE_URL reachable config set ({settings.openclaw_base_url})"))
+
     # --- report ---
     if args.json:
         _print_json([
@@ -344,6 +351,45 @@ def cmd_demo(args: argparse.Namespace) -> int:
         offline_ok=args.offline_ok,
         decision_text=args.decision,
     )
+
+
+# ------------------------------------------------------------------------- ask
+def cmd_ask(args: argparse.Namespace) -> int:
+    """Ask the First Brain: one 8-phase turn with gate + trace + consolidation."""
+    from local.agent import FirstBrainAgent, TaskInput
+    from local.config import get_brain_settings
+    from local.llm import get_chat_llm
+
+    settings = get_brain_settings()
+    client = _client(settings)
+    store = getattr(client, "store", None)
+    if not hasattr(store, "log_turn"):
+        store = None
+    agent = FirstBrainAgent(client, llm=get_chat_llm(settings), settings=settings, store=store)
+    try:
+        project_id = _resolve_project(client, args.project)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    result = agent.run(TaskInput(question=args.question, project_id=project_id))
+    if args.json:
+        _print_json({
+            "answer": result.answer,
+            "verified": result.verified,
+            "memories_used": result.memories_used,
+            "gate": {"retrieve": result.gate_retrieve, "reason": result.gate_reason},
+            "consolidated_facts": result.consolidated_facts,
+            "stored": result.stored.status if result.stored else None,
+            "steps": [{"phase": s.phase, "output": s.output} for s in result.steps],
+        })
+        return 0
+    for step in result.steps:
+        print(f"[{step.phase:<8}] {step.output[:200]}")
+    print(f"\ngate: {'retrieve' if result.gate_retrieve else 'skip'} ({result.gate_reason})"
+          f" | memories: {result.memories_used} | verified: {result.verified}"
+          f" | consolidated: {result.consolidated_facts}")
+    print(f"\n{result.answer}")
+    return 0
 
 
 # ------------------------------------------------------------------------ docs
@@ -525,6 +571,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync = sub.add_parser("sync", help="flush queued writes to the Second Brain")
     p_sync.add_argument("--max", type=int, default=None)
     p_sync.set_defaults(func=cmd_sync)
+
+    p_ask = sub.add_parser("ask", help="ask the First Brain (8-phase loop, gate + trace)")
+    p_ask.add_argument("question")
+    p_ask.add_argument("--project", default=None)
+    p_ask.add_argument("--json", action="store_true")
+    p_ask.set_defaults(func=cmd_ask)
 
     mem = sub.add_parser("memory", help="memory operations")
     mem_sub = mem.add_subparsers(dest="memory_command", required=True)

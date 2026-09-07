@@ -53,6 +53,34 @@ function Test-LMStudio {
         return $false
     }
 }
+function Get-DeepSeekKey {
+    # Key source priority: $env:DEEPSEEK_API_KEY > $env:LLM_API_KEY > local/.env DEEPSEEK_API_KEY/LLM_API_KEY
+    if ($env:DEEPSEEK_API_KEY -and $env:DEEPSEEK_API_KEY.Trim()) { return $env:DEEPSEEK_API_KEY.Trim() }
+    try {
+        $localEnvPath = Join-Path $root "local\.env"
+        if (Test-Path $localEnvPath) {
+            $raw = Get-Content $localEnvPath -Raw
+            if ($raw -match '(?m)^DEEPSEEK_API_KEY\s*=\s*(\S+)\s*$') { $k = $Matches[1].Trim(); if ($k) { return $k } }
+            # Fallback: LLM_API_KEY doubles as deepseek key when provider=deepseek
+            if ($raw -match '(?m)^LLM_PROVIDER\s*=\s*deepseek\s*$' -and $raw -match '(?m)^LLM_API_KEY\s*=\s*(\S+)\s*$') {
+                $k = $Matches[1].Trim(); if ($k) { return $k }
+            }
+        }
+    } catch {}
+    if ($env:LLM_API_KEY -and $env:LLM_API_KEY.Trim()) { return $env:LLM_API_KEY.Trim() }
+    return ""
+}
+function Test-DeepSeek {
+    param([string]$ApiKey)
+    if (-not $ApiKey) { return $false }
+    try {
+        $headers = @{ Authorization = "Bearer $ApiKey" }
+        $response = Invoke-RestMethod -Uri "https://api.deepseek.com/v1/models" -Headers $headers -TimeoutSec 5 -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
 
 # Function to check if API is running
 function Test-API {
@@ -65,9 +93,16 @@ function Test-API {
     }
 }
 
-# 1. Detect LLM/Embedding availability (priority: LMStudio > Ollama > hash/none)
+# 1. Detect LLM/Embedding availability (priority: LMStudio > Ollama > DeepSeek API > hash/none)
+# NOTE: DeepSeek cloud is chat-only (no embedding API) -> LLM=deepseek + EMBEDDING=hash.
+# DeepSeek local via Ollama (deepseek-r1:8b) is covered by the Ollama branch (LLM_MODEL=deepseek-r1:*).
 $lmstudioAvailable = Test-LMStudio
 $ollamaAvailable = Test-Ollama
+$deepseekKey = Get-DeepSeekKey
+$deepseekAvailable = $false
+if (-not $lmstudioAvailable -and -not $ollamaAvailable -and $deepseekKey) {
+    $deepseekAvailable = Test-DeepSeek -ApiKey $deepseekKey
+}
 if ($lmstudioAvailable) {
     Write-Host "[LMSTUDIO MODE] LMStudio detected at http://127.0.0.1:1234/v1" -ForegroundColor Green
     try { $models = (Invoke-RestMethod -Uri "http://127.0.0.1:1234/v1/models" -TimeoutSec 3).data.id -join ", "; Write-Host "  Models: $models" -ForegroundColor Gray } catch {}
@@ -75,10 +110,25 @@ if ($lmstudioAvailable) {
     $env:LLM_PROVIDER = "lmstudio"
 } elseif ($ollamaAvailable) {
     Write-Host "[ONLINE MODE] Ollama detected at http://localhost:11434" -ForegroundColor Green
+    try {
+        $ollamaModels = (Invoke-RestMethod -Uri "http://localhost:11434/api/tags" -TimeoutSec 3).models.name -join ", "
+        Write-Host "  Models: $ollamaModels" -ForegroundColor Gray
+        if ($ollamaModels -match "deepseek") {
+            Write-Host "  Hint: DeepSeek-R1 local available - set LLM_MODEL=deepseek-r1:8b in local/.env to use it" -ForegroundColor Cyan
+        }
+    } catch {}
     $env:EMBEDDING_PROVIDER = "ollama"
     $env:LLM_PROVIDER = "ollama"
+} elseif ($deepseekAvailable) {
+    Write-Host "[DEEPSEEK MODE] DeepSeek API reachable (chat-only, embeddings=hash)" -ForegroundColor Green
+    $env:EMBEDDING_PROVIDER = "hash"
+    $env:LLM_PROVIDER = "deepseek"
 } else {
-    Write-Host "[OFFLINE MODE] Ollama/LMStudio not available - using hash embeddings fallback" -ForegroundColor Yellow
+    if ($deepseekKey) {
+        Write-Host "[OFFLINE MODE] Ollama/LMStudio down, DeepSeek API unreachable (check key/network) - using hash embeddings fallback" -ForegroundColor Yellow
+    } else {
+        Write-Host "[OFFLINE MODE] Ollama/LMStudio not available - using hash embeddings fallback (tip: set DEEPSEEK_API_KEY in local/.env for DeepSeek cloud chat)" -ForegroundColor Yellow
+    }
     $env:EMBEDDING_PROVIDER = "hash"
     $env:LLM_PROVIDER = "none"
 }
@@ -110,6 +160,19 @@ if (Test-Path $localEnv) {
     if ($env:LLM_PROVIDER -eq "lmstudio") {
         $content = $content -replace 'LLM_MODEL=.*', "LLM_MODEL=vistral-7b-chat"
         $content = $content -replace 'LLM_BASE_URL=.*', "LLM_BASE_URL=http://127.0.0.1:1234/v1"
+    } elseif ($env:LLM_PROVIDER -eq "deepseek") {
+        # DeepSeek cloud endpoint; keep existing deepseek-* model, else default to deepseek-chat
+        if ($content -notmatch '(?m)^LLM_MODEL\s*=\s*deepseek') {
+            $content = $content -replace '(?m)^LLM_MODEL\s*=.*', "LLM_MODEL=deepseek-chat"
+        }
+        if ($content -match '(?m)^LLM_BASE_URL\s*=') {
+            $content = $content -replace '(?m)^LLM_BASE_URL\s*=.*', "LLM_BASE_URL=https://api.deepseek.com/v1"
+        } else {
+            $content = $content.TrimEnd() + "`nLLM_BASE_URL=https://api.deepseek.com/v1`n"
+        }
+        if ($content -notmatch '(?m)^DEEPSEEK_API_KEY\s*=\S') {
+            Write-Host "  WARNING: DEEPSEEK_API_KEY is empty in local/.env - DeepSeek chat will fall back to EchoLLM" -ForegroundColor Yellow
+        }
     }
     Set-Content $localEnv -Value $content -Encoding UTF8
     Write-Host "Updated local/.env: LLM_PROVIDER=$env:LLM_PROVIDER"

@@ -1,8 +1,10 @@
-"""Local LLM provider abstraction (spec sections 2/17): Ollama, LM Studio, offline fallback.
+"""Local LLM provider abstraction (spec sections 2/17): Ollama, LM Studio, DeepSeek, offline fallback.
 
-Both providers are OpenAI-compatible in practice, but Ollama's native /api/chat is
-used when available; LM Studio uses /v1/chat/completions. EchoLLM keeps the whole
-agent loop functional on a laptop with no model server running.
+Ollama uses native /api/chat; LM Studio / DeepSeek / openai_compatible use
+OpenAI-style /v1/chat/completions. DeepSeek cloud (api.deepseek.com) is chat-only
+— embeddings stay on hash/ollama/lmstudio. DeepSeek-R1 run via Ollama locally
+(e.g. model deepseek-r1:8b) keeps working through the ollama provider.
+EchoLLM keeps the whole agent loop functional with no model server running.
 """
 
 from __future__ import annotations
@@ -16,20 +18,44 @@ class LLMUnavailable(RuntimeError):
     pass
 
 
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+
+
 def resolve_base_url(provider: str, explicit: str = "") -> str:
     if explicit.strip():
         return explicit.strip().rstrip("/")
     if provider == "lmstudio":
         return "http://127.0.0.1:1234/v1"
+    if provider == "deepseek":
+        return DEEPSEEK_BASE_URL
+    if provider == "openclaw":
+        # No implicit default: OpenClaw gateway is WebSocket RPC, not
+        # OpenAI-compatible. Caller must pass OPENCLAW_BASE_URL explicitly.
+        return ""
+    if provider in ("openai_compatible", "none"):
+        return ""
     return "http://127.0.0.1:11434"
 
 
 def llm_online(settings: BrainSettings) -> bool:
     """Cheap availability probe (2s timeout)."""
+    if settings.llm_provider == "none":
+        return False
     base = settings.resolved_llm_base_url
-    path = "/models" if settings.llm_provider == "lmstudio" else "/api/tags"
+    if not base:
+        return False
+    if settings.llm_provider in ("lmstudio", "deepseek", "openai_compatible", "openclaw"):
+        headers = {}
+        key = settings.resolved_llm_api_key
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        try:
+            resp = httpx.get(f"{base}/models", timeout=2.0, headers=headers)
+            return resp.status_code == 200
+        except httpx.HTTPError:
+            return False
     try:
-        resp = httpx.get(f"{base}{path}", timeout=2.0)
+        resp = httpx.get(f"{base}/api/tags", timeout=2.0)
         return resp.status_code == 200
     except httpx.HTTPError:
         return False
@@ -154,11 +180,13 @@ class EchoLLM(BaseChatLLM):
 
 def get_chat_llm(settings: BrainSettings | None = None) -> BaseChatLLM:
     s = settings or BrainSettings()
+    if s.llm_provider == "none":
+        return EchoLLM()
     if not llm_online(s):
         return EchoLLM()
     base = s.resolved_llm_base_url
-    if s.llm_provider == "lmstudio":
-        return OpenAICompatChat(s.llm_model, base, s.llm_api_key, s.llm_timeout_seconds)
+    if s.llm_provider in ("lmstudio", "deepseek", "openai_compatible", "openclaw"):
+        return OpenAICompatChat(s.llm_model, base, s.resolved_llm_api_key, s.llm_timeout_seconds)
     if s.llm_provider == "ollama":
         return OllamaChat(s.llm_model, base, s.llm_api_key, s.llm_timeout_seconds)
     return EchoLLM()
