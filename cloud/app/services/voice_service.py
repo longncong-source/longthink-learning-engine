@@ -1,10 +1,11 @@
-"""Voice service - 2-way speech for LongThink (STT Whisper cloud + TTS Edge vi cloud).
+"""Voice service - 2-way speech for LongThink.
 
-Pipeline: mic audio (webm) -> transcribe (OpenAI Whisper, Vietnamese)
-  -> answer_from_longthink (reuse hybrid memory search, cited extractive)
-  -> synthesize (EdgeTTS vi-VN, mp3) -> browser playback.
+Pipeline: mic audio (webm) -> transcribe -> answer_from_longthink
+  (reuse hybrid memory search, cited extractive) -> synthesize
+  (EdgeTTS vi-VN, mp3) -> browser playback.
 
-Cloud path by design: callers must run under DATA_POLICY=cloud_allowed.
+STT providers: local (faster-whisper offline, free, default) |
+  openai (Whisper cloud, needs OPENAI_API_KEY).
 Audio bytes are never logged or persisted (same rule as query/bodies).
 """
 
@@ -28,12 +29,14 @@ DEFAULT_VOICE = "vi-VN-HoaiMyNeural"
 
 
 def transcribe(audio: bytes, filename: str, settings: Settings | None = None) -> str:
-    """Speech-to-text via OpenAI Whisper. Returns plain Vietnamese text."""
+    """Speech-to-text. Returns plain Vietnamese text."""
     s = settings or get_settings()
+    if (s.voice_stt_provider or "local").lower() == "local":
+        return _transcribe_local(audio, filename, s)
     if not s.openai_api_key:
         raise UpstreamUnavailableError(
-            "Voice STT needs OPENAI_API_KEY (cloud path). "
-            "Set it in cloud/.env to enable /v1/voice/*."
+            "Voice STT needs OPENAI_API_KEY (cloud path) or VOICE_STT_PROVIDER=local "
+            "(faster-whisper offline, free). Set one in cloud/.env to enable /v1/voice/*."
         )
     try:
         resp = httpx.post(
@@ -54,6 +57,59 @@ def transcribe(audio: bytes, filename: str, settings: Settings | None = None) ->
     if not text:
         raise UpstreamUnavailableError(
             "Voice STT returned empty text", details={"reason": "empty transcript"}
+        )
+    return text
+
+
+_local_models: dict[tuple[str, str, str], object] = {}
+
+
+def _load_local_model(model_name: str, device: str, compute: str) -> object:
+    """Lazy singleton: download once (~500MB for small), reuse across requests."""
+    key = (model_name, device, compute)
+    if key not in _local_models:
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:
+            raise DependencyMissingError(
+                "Voice STT local needs the 'faster-whisper' package. "
+                "Install: .venv\\Scripts\\python.exe -m pip install faster-whisper"
+            ) from exc
+        _local_models[key] = WhisperModel(model_name, device=device, compute_type=compute)
+    return _local_models[key]
+
+
+def _transcribe_local(audio: bytes, filename: str, s: Settings) -> str:
+    """Speech-to-text offline via faster-whisper (free, audio never leaves the box)."""
+    import os
+    import tempfile
+
+    model = _load_local_model(s.voice_stt_model_local, s.voice_stt_device, s.voice_stt_compute)
+    suffix = ".webm"
+    if filename and "." in filename:
+        suffix = "." + filename.rsplit(".", 1)[1].lower()[:5]
+    fd_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(audio)
+            fd_path = tmp.name
+        segments, _info = model.transcribe(fd_path, language=s.voice_stt_language, beam_size=5)  # type: ignore[attr-defined]
+        text = "".join(seg.text for seg in segments).strip()
+    except (DependencyMissingError, UpstreamUnavailableError):
+        raise
+    except Exception as exc:  # noqa: BLE001 - surface as 503 with reason
+        raise UpstreamUnavailableError(
+            "Voice STT local failed", details={"reason": str(exc)[:200]}
+        ) from exc
+    finally:
+        try:
+            if fd_path:
+                os.unlink(fd_path)
+        except OSError:
+            pass
+    if not text:
+        raise UpstreamUnavailableError(
+            "Voice STT local returned empty text", details={"reason": "empty transcript"}
         )
     return text
 

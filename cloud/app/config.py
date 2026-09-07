@@ -89,10 +89,13 @@ class Settings(BaseSettings):
     mid_brain_obsidian_vault_path: str = ""
     mid_brain_confidence_threshold: float = 0.62
 
-    # Voice: 2-way speech for LongThink (STT whisper cloud + TTS edge vi cloud).
-    # Cloud path by design - requires DATA_POLICY=cloud_allowed on the caller side.
-    voice_stt_provider: Literal["openai"] = "openai"
-    voice_stt_model: str = "whisper-1"
+    # Voice: 2-way speech for LongThink.
+    # STT: local (faster-whisper offline, free, default) | openai (Whisper cloud, needs key).
+    voice_stt_provider: Literal["openai", "local"] = "local"
+    voice_stt_model: str = "whisper-1"  # openai cloud model
+    voice_stt_model_local: str = "small"  # faster-whisper: tiny|base|small|medium (vi: small+)
+    voice_stt_device: str = "cpu"
+    voice_stt_compute: str = "int8"
     voice_stt_language: str = "vi"
     voice_tts_provider: Literal["edge"] = "edge"
     voice_tts_voice: str = "vi-VN-HoaiMyNeural"

@@ -38,8 +38,43 @@ class TestVoiceServiceErrors:
         from cloud.app.errors import UpstreamUnavailableError
         from cloud.app.services import voice_service
 
-        s = Settings(_env_file=None, openai_api_key="")  # type: ignore[call-arg]
+        s = Settings(_env_file=None, voice_stt_provider="openai", openai_api_key="")  # type: ignore[call-arg]
         with pytest.raises(UpstreamUnavailableError):
+            voice_service.transcribe(b"fake", "mic.webm", s)
+
+    def test_transcribe_local_uses_model(self, monkeypatch):  # type: ignore[no-untyped-def]
+        from cloud.app.config import Settings
+        from cloud.app.services import voice_service
+
+        class FakeSeg:
+            def __init__(self, text):  # type: ignore[no-untyped-def]
+                self.text = text
+
+        class FakeModel:
+            def __init__(self):  # type: ignore[no-untyped-def]
+                self.calls = []
+
+            def transcribe(self, path, language=None, beam_size=None):  # type: ignore[no-untyped-def]
+                self.calls.append({"path": path, "language": language})
+                return [FakeSeg("xin chào "), FakeSeg("LongThink")], None
+
+        fake = FakeModel()
+        monkeypatch.setattr(voice_service, "_load_local_model", lambda *a: fake)
+        s = Settings(_env_file=None, voice_stt_provider="local")  # type: ignore[call-arg]
+        assert voice_service.transcribe(b"FAKEAUDIO", "mic.webm", s) == "xin chào LongThink"
+        assert fake.calls and fake.calls[0]["language"] == s.voice_stt_language
+
+    def test_transcribe_local_needs_package(self, monkeypatch):  # type: ignore[no-untyped-def]
+        import sys
+
+        from cloud.app.config import Settings
+        from cloud.app.errors import DependencyMissingError
+        from cloud.app.services import voice_service
+
+        voice_service._local_models.clear()
+        monkeypatch.setitem(sys.modules, "faster_whisper", None)
+        s = Settings(_env_file=None, voice_stt_provider="local")  # type: ignore[call-arg]
+        with pytest.raises(DependencyMissingError):
             voice_service.transcribe(b"fake", "mic.webm", s)
 
     def test_synthesize_needs_package(self, monkeypatch):  # type: ignore[no-untyped-def]
