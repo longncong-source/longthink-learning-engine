@@ -107,6 +107,7 @@ class TestParserStructure:
         # spec section 28 surface
         for argv in (
             ["status"], ["doctor", "--json"],
+            ["ask", "what happened?"],
             ["memory", "search", "mechanical delay"],
             ["memory", "add", "--title", "t", "--content", "c"],
             ["memory", "list"],
@@ -162,3 +163,32 @@ class TestHandlers:
         assert "First Brain" in out and "Second Brain" in out
         # With stubbed API up + key accepted, doctor should pass its critical checks.
         assert exit_code == 0
+
+
+class TestAsk:
+    def test_ask_runs_loop_with_gate(self, patched_client, capsys, monkeypatch):  # type: ignore[no-untyped-def]
+        from local.llm import EchoLLM
+
+        monkeypatch.setattr("local.llm.get_chat_llm", lambda settings=None: EchoLLM())
+        assert main(["ask", "What happened with mechanical delays?"]) == 0
+        out = capsys.readouterr().out
+        assert "gate: retrieve" in out
+        assert "Review drawings before procurement." in out
+
+    def test_ask_json_gate_skip(self, patched_client, capsys, monkeypatch):  # type: ignore[no-untyped-def]
+        from local.llm import EchoLLM
+
+        monkeypatch.setattr("local.llm.get_chat_llm", lambda settings=None: EchoLLM())
+        assert main(["ask", "what's 2+2?", "--json"]) == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["gate"] == {"retrieve": False, "reason": "pure math"}
+        assert data["memories_used"] == 0
+
+    def test_ask_logs_turn_to_real_store(self, patched_client, capsys, monkeypatch, tmp_path):  # type: ignore[no-untyped-def]
+        from local.llm import EchoLLM
+        from local.local_store import LocalStore
+
+        monkeypatch.setattr("local.llm.get_chat_llm", lambda settings=None: EchoLLM())
+        patched_client.store = LocalStore(tmp_path / "ask.db")
+        assert main(["ask", "We decided to switch suppliers."]) == 0
+        assert patched_client.store.unconsolidated_count() == 1

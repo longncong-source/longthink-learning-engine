@@ -82,6 +82,14 @@ class CognitiveOrchestrator:
         start_time = time.time()
         steps: list[CognitiveStep] = []
 
+        from mid_brain.ops.turn_trace import TurnTracer
+
+        _trace_dir = getattr(self.mid_brain.config, "trace_dir", "") or "mid_brain_data/traces"
+        _tracer = (
+            TurnTracer(_trace_dir) if getattr(self.mid_brain.config, "trace_enabled", True) else TurnTracer(None)
+        )
+        _tracer.event("turn_start", trace_id=trace_id, question=question[:500])
+
         # Initialize tracking
         network_nodes_created = 0
         obsidian_notes_synced = 0
@@ -148,16 +156,28 @@ class CognitiveOrchestrator:
                 pass
 
         # Step 1: RECALL - Retrieve from Mid Brain memory
+        # Retrieval gate (tini-agent pattern): skip the store when the turn
+        # cannot need memory. Fail-open: anything else retrieves as before.
         step_start = time.time()
-        recall_result = self.mid_brain.memory.retrieve(
-            query=question,
-            project_id=project_id,
-            limit=10,
-        )
+        from mid_brain.memory.retrieval_gate import should_retrieve as _should_retrieve
+
+        _gate = _should_retrieve(question)
+        if _gate.retrieve:
+            recall_result = self.mid_brain.memory.retrieve(
+                query=question,
+                project_id=project_id,
+                limit=10,
+            )
+        else:
+            recall_result = {"results": [], "total": 0, "query": question}
         steps.append(CognitiveStep(
             phase="RECALL",
             input={"query": question, "project_id": project_id},
-            output={"results_count": len(recall_result.get("results", []))},
+            output={
+                "results_count": len(recall_result.get("results", [])),
+                "gate": "retrieve" if _gate.retrieve else "skip",
+                "gate_reason": _gate.reason,
+            },
             duration_ms=(time.time() - step_start) * 1000,
             success=True,
         ))
@@ -448,6 +468,18 @@ class CognitiveOrchestrator:
 
         total_duration = (time.time() - start_time) * 1000
 
+        _tracer.event(
+            "turn_end",
+            trace_id=trace_id,
+            gate="retrieve" if _gate.retrieve else "skip",
+            gate_reason=_gate.reason,
+            memories_used=len(recall_result.get("results", [])),
+            confidence=confidence,
+            conflicts=len(conflicts),
+            phases=[s.phase for s in steps],
+            total_duration_ms=round(total_duration, 1),
+        )
+
         # Publish final feedback event
         _publish_feedback("ANSWER", f"Answered: {question[:100]} -> {answer[:200]}", {
             "confidence": confidence,
@@ -463,6 +495,8 @@ class CognitiveOrchestrator:
             "total_duration_ms": total_duration,
             "steps": [asdict(s) for s in steps],
             "memories_used": len(recall_result.get("results", [])),
+            "gate": "retrieve" if _gate.retrieve else "skip",
+            "gate_reason": _gate.reason,
             "knowledge_used": 0,
             "conflicts_detected": len(conflicts),
             "learning_stored": learning_stored,

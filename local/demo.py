@@ -36,7 +36,9 @@ def _print_result(result) -> None:  # type: ignore[no-untyped-def]
     for step in result.steps:
         preview = step.output if len(step.output) <= 160 else step.output[:157] + "..."
         print(f"  [{step.phase:<8}] {preview}")
+    gate = "retrieve" if result.gate_retrieve else "skip"
     print(f"  memories used: {result.memories_used} | verified: {result.verified}")
+    print(f"  gate: {gate} ({result.gate_reason}) | consolidated: {result.consolidated_facts}")
 
 
 def run_demo(
@@ -48,7 +50,10 @@ def run_demo(
     decision_text: str | None = None,
 ) -> int:
     """Execute spec section 27 steps 1-10. Returns process exit code."""
-    agent = FirstBrainAgent(client, llm=llm)
+    store = getattr(client, "store", None)
+    if not hasattr(store, "log_turn"):
+        store = None
+    agent = FirstBrainAgent(client, llm=llm, store=store)
 
     _banner("FIRST BRAIN + SECOND BRAIN - MVP DEMO (spec section 27)")
     health = client.health()

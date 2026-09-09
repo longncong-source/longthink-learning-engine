@@ -4,6 +4,8 @@ Tables:
     session_notes  - short-term local context that NEVER leaves the laptop
     pending_writes - outbox queue for memories waiting for the cloud to return
     query_cache    - TTL cache of Second Brain search responses
+    turn_log       - append-only raw conversation turns for consolidation
+                     (never deleted; consolidation only flips `consolidated`)
 """
 
 from __future__ import annotations
@@ -33,6 +35,14 @@ CREATE TABLE IF NOT EXISTS query_cache (
     cache_key TEXT PRIMARY KEY,
     response TEXT NOT NULL,
     expires_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS turn_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    reflection TEXT NOT NULL DEFAULT '',
+    consolidated INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
 );
 """
 
@@ -147,5 +157,45 @@ class LocalStore:
     def clear_cache(self) -> int:
         with self._lock:
             cur = self._conn.execute("DELETE FROM query_cache")
+            self._conn.commit()
+        return cur.rowcount
+
+    # --------------------------------------------------------------- turn log
+    def log_turn(self, question: str, answer: str, reflection: str = "") -> int:
+        """Append one raw turn. Never deleted; consolidation only flips the flag."""
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO turn_log (question, answer, reflection, created_at) VALUES (?,?,?,?)",
+                (question, answer, reflection,
+                 time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+            )
+            self._conn.commit()
+        return int(cur.lastrowid)
+
+    def unconsolidated_count(self) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM turn_log WHERE consolidated=0"
+            ).fetchone()
+        return int(row["c"])
+
+    def unconsolidated_turns(self, limit: int = 12) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM turn_log WHERE consolidated=0 ORDER BY id LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_turns_consolidated(self, ids: list[int]) -> int:
+        """Mark exactly the IDs that were read. New arrivals stay unconsolidated."""
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        with self._lock:
+            cur = self._conn.execute(
+                f"UPDATE turn_log SET consolidated=1 WHERE id IN ({placeholders})",
+                [int(i) for i in ids],
+            )
             self._conn.commit()
         return cur.rowcount

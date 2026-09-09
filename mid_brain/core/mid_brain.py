@@ -50,6 +50,9 @@ class MidBrainConfig:
     confidence_threshold: float = 0.62  # tối ưu thông minh: cao hơn 0.5 để bắt buộc Human quyết khi nghi ngờ
     short_term_ttl_days: int = 7
     second_brain_provider: str = "openclaw"  # openclaw | chatgpt | gemini
+    # Turn trace (tini-agent pattern: always-on JSONL, zero setup)
+    trace_enabled: bool = True
+    trace_dir: str = ""  # empty => mid_brain_data/traces
 
 
 @dataclass(slots=True)
