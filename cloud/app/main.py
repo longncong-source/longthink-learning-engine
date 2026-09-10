@@ -23,7 +23,7 @@ from cloud.app.db import get_repository, reset_repository
 from cloud.app.errors import DomainError, RateLimitError
 from cloud.app.routers import admin, code, comfy, documents, graph, health, lmstudio, memories, mid_brain, obsidian, odc, projects, voice
 from cloud.app.routers import code_proxy, odc_proxy
-from cloud.app.security import RateLimiter, client_identity
+from cloud.app.security import RateLimiter, client_identity, custom_limiter_for_request
 from cloud.app.services import audit_service
 
 logger = logging.getLogger("fsb")
@@ -72,6 +72,21 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         if _audit_skipped(path):
             return
         metrics.inc("fsb_http_requests_total", {"code": str(status)})
+        # Best-effort actor attribution for multi-assistant ops (metadata only).
+        actor_detail: dict = {}
+        try:
+            from cloud.app.identity import acl_configured, resolve_identity
+
+            if acl_configured():
+                raw_key = request.headers.get("x-api-key")
+                authz = request.headers.get("authorization")
+                if not raw_key and authz and authz.lower().startswith("bearer "):
+                    raw_key = authz[7:].strip()
+                ident = resolve_identity(raw_key)
+                if ident is not None:
+                    actor_detail = {"actor": ident.user, "phong": ident.phong, "role": ident.role}
+        except Exception:  # noqa: BLE001 - attribution never breaks audit
+            actor_detail = {}
         try:
             await run_in_threadpool(
                 lambda: audit_service.record(
@@ -82,6 +97,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                     path=path,
                     status=status,
                     duration_ms=duration_ms,
+                    detail=actor_detail or None,
                 )
             )
         except Exception:  # noqa: BLE001 - audit never breaks requests
@@ -106,7 +122,9 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             return response
 
         try:
-            self.limiter.check(identity)
+            # Per-key quota from ORG_ACL_JSON wins when configured; else server default.
+            custom = custom_limiter_for_request(request)
+            (custom or self.limiter).check(identity)
         except RateLimitError as exc:
             retry_after = str(exc.details.get("retry_after_seconds", "60"))
             duration_ms = int((time.perf_counter() - start) * 1000)

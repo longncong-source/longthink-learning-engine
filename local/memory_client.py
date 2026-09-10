@@ -110,8 +110,15 @@ class SecondBrainClient:
         if filters:
             payload["filters"] = filters
 
+        # Namespace the cache by API key so assistants sharing a laptop (or a
+        # local.db) can never hit each other's cached results (cross-tenant leak).
+        key_fingerprint = hashlib.sha256(
+            (self.settings.second_brain_api_key or "nokey").encode("utf-8")
+        ).hexdigest()[:16]
         cache_key = hashlib.sha256(
-            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            (key_fingerprint + json.dumps(payload, sort_keys=True, ensure_ascii=False)).encode(
+                "utf-8"
+            )
         ).hexdigest()
         cached = self.store.cache_get(cache_key)
         if cached is not None:
@@ -168,13 +175,18 @@ class SecondBrainClient:
             self.store.add_note("local_only_memory", f"{title_r.text}\n{content_r.text}")
             return WriteOutcome(status="skipped_policy", redaction_count=redaction_count)
 
+        actor_hint = hashlib.sha256(
+            (self.settings.second_brain_api_key or "nokey").encode("utf-8")
+        ).hexdigest()[:8]
+        stamped_metadata = dict(metadata or {})
+        stamped_metadata.setdefault("_actor_hint", actor_hint)
         payload: dict[str, Any] = {
             "type": type,
             "title": title_r.text,
             "content": content_r.text,
             "importance": importance,
             "confidence": confidence,
-            "metadata": dict(metadata or {}),
+            "metadata": stamped_metadata,
         }
         if summary_r.text:
             payload["summary"] = summary_r.text

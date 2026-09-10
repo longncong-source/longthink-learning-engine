@@ -18,6 +18,11 @@ class AuthenticationError(DomainError):
     code = "unauthorized"
 
 
+class ForbiddenError(DomainError):
+    status_code = 403
+    code = "forbidden"
+
+
 class NotFoundError(DomainError):
     status_code = 404
     code = "not_found"

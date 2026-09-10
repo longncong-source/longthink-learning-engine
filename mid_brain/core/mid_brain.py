@@ -398,17 +398,22 @@ class MidBrain:
         """Create an execution plan for a goal."""
         return self.planning.create_plan(goal, context, constraints)
 
-    def execute_plan(self, plan) -> list:
-        """Execute a plan via the agent manager."""
-        return self.agent.execute_plan(plan)
+    def execute_plan(self, plan, *, auto_approve: bool = False, approved_ids=None) -> list:
+        """Execute a plan via the agent manager (high-risk needs explicit approval)."""
+        return self.agent.execute_plan(plan, auto_approve=auto_approve, approved_ids=approved_ids)
 
     def create_and_execute(
         self,
         goal: str,
         context: dict[str, Any] | None = None,
+        *,
+        auto_approve: bool = False,
+        approved_ids=None,
     ) -> tuple:
         """Create a plan and execute it."""
-        return self.agent.create_and_execute(goal, context)
+        return self.agent.create_and_execute(
+            goal, context, auto_approve=auto_approve, approved_ids=approved_ids
+        )
 
     # ------------------------------------------------------------------ obsidian sync
 

@@ -101,7 +101,7 @@ class OpenCodeAdapter:
     def execute_task(self, task: TaskSpec, context: dict[str, Any] | None = None) -> ExecutionResult:
         """Execute a task using OpenCode."""
         start = time.time()
-        result = ExecutionResult(task_id=task.task_id)
+        result = ExecutionResult(task_id=task.task_id, success=False)
 
         try:
             # Build the prompt for OpenCode
@@ -304,9 +304,22 @@ class AgentManager:
             # Don't let sync failures break execution
             pass
 
-    def execute_plan(self, plan: Plan) -> list[ExecutionResult]:
-        """Execute a full plan."""
+    def execute_plan(
+        self,
+        plan: Plan,
+        *,
+        auto_approve: bool = False,
+        approved_ids: set[str] | None = None,
+    ) -> list[ExecutionResult]:
+        """Execute a full plan.
+
+        High-risk tasks NEVER run without explicit human approval (hỏi trước
+        khi ghi/xóa/chạy): pass approved_ids={task_id,...} from the caller
+        (API layer collects human approvals). auto_approve=True restores the
+        old testing behaviour and must never be used in multi-user serving.
+        """
         results = []
+        approved_ids = set(approved_ids or ())
 
         for task in plan.tasks:
             # Check dependencies
@@ -321,17 +334,26 @@ class AgentManager:
                     results.append(result)
                     continue
 
-            # Check if human approval needed
-            if task.risk_level == "high":
+            # Check if human approval needed (high-risk: never auto-run)
+            if task.risk_level == "high" or task.priority == "critical":
                 approval_id = self.approval.request_approval(
                     task,
                     f"High-risk task: {task.objective}",
                 )
-                # In real implementation, would wait for approval
-                # For now, auto-approve for testing
-                self.approval.approve(approval_id, "auto-test")
+                if auto_approve or task.task_id in approved_ids:
+                    self.approval.approve(approval_id, "explicit-human" if not auto_approve else "auto-test")
+                elif self.approval.is_approved(task.task_id):
+                    pass  # approved via approval manager directly
+                else:
+                    result = ExecutionResult(
+                        task_id=task.task_id,
+                        success=False,
+                        error="Pending human approval",
+                    )
+                    results.append(result)
+                    continue
 
-            if not self.approval.is_approved(task.task_id):
+            if task.risk_level == "high" and not self.approval.is_approved(task.task_id):
                 result = ExecutionResult(
                     task_id=task.task_id,
                     success=False,
@@ -373,10 +395,16 @@ class AgentManager:
 
         return results
 
-    def execute_single_task(self, task: TaskSpec) -> ExecutionResult:
+    def execute_single_task(
+        self,
+        task: TaskSpec,
+        *,
+        auto_approve: bool = False,
+        approved_ids: set[str] | None = None,
+    ) -> ExecutionResult:
         """Execute a single task."""
         plan = Plan(tasks=[task])
-        results = self.execute_plan(plan)
+        results = self.execute_plan(plan, auto_approve=auto_approve, approved_ids=approved_ids)
         return results[0] if results else ExecutionResult(task_id=task.task_id, success=False, error="No result")
 
     def get_execution_history(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -387,6 +415,9 @@ class AgentManager:
         self,
         goal: str,
         context: dict[str, Any] | None = None,
+        *,
+        auto_approve: bool = False,
+        approved_ids: set[str] | None = None,
     ) -> tuple[Plan, list[ExecutionResult]]:
         """Create a plan and execute it."""
         plan = self.planner.create_plan(goal, context)
@@ -411,5 +442,5 @@ class AgentManager:
                     )
             except Exception:
                 pass
-        results = self.execute_plan(plan)
+        results = self.execute_plan(plan, auto_approve=auto_approve, approved_ids=approved_ids)
         return plan, results

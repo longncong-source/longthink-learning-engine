@@ -38,6 +38,10 @@ class Settings(BaseSettings):
 
     # Security (spec sections 18/21)
     memory_api_keys: str = ""
+    # Org ACL (multi-assistant, 6 phong + BGD): JSON list of
+    # {key,user,phong,role,projects?,tools?,data_policy?}. Empty = open mode
+    # (backward compatible). See cloud/app/identity.py for schema + defaults.
+    org_acl_json: str = ""
     rate_limit_per_minute: int = 240
     # Browser cross-origin access (dashboard on one host calling another API).
     # Comma-separated origins, or "*" for any (auth is still enforced via API key).

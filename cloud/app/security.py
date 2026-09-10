@@ -9,8 +9,13 @@ from collections import defaultdict, deque
 
 from fastapi import Header, Request
 
+from typing import TYPE_CHECKING
+
 from cloud.app.config import get_settings
 from cloud.app.errors import AuthenticationError, RateLimitError
+
+if TYPE_CHECKING:
+    from cloud.app.identity import Identity
 
 
 def _extract_supplied_key(x_api_key: str | None, authorization: str | None) -> str | None:
@@ -40,6 +45,67 @@ def require_api_key(
             return supplied
 
     raise AuthenticationError("Invalid API key")
+
+
+def require_identity(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    authorization: str | None = Header(default=None),
+) -> Identity | None:
+    """Authenticated key + org identity (None in open mode).
+
+    Raises 403 when the server runs closed mode (ORG_ACL_JSON set) but the
+    valid key has no identity entry — valid key, missing provisioning.
+    """
+    from cloud.app.errors import ForbiddenError
+    from cloud.app.identity import acl_configured, resolve_identity
+
+    supplied = require_api_key(x_api_key, authorization)
+    if not acl_configured():
+        return None
+    identity = resolve_identity(supplied)
+    if identity is None:
+        raise ForbiddenError(
+            "API key has no org identity (missing from ORG_ACL_JSON) - contact Admin",
+        )
+    return identity
+
+
+_LIMITERS_LOCK = threading.Lock()
+_LIMITERS: dict[str, RateLimiter] = {}  # type: ignore[valid-type]  # defined below, filled lazily
+
+
+def reset_limiters() -> None:
+    """Clear per-key limiter state (tests / key rotation)."""
+    with _LIMITERS_LOCK:
+        _LIMITERS.clear()
+
+
+def custom_limiter_for_request(request: Request) -> RateLimiter | None:  # type: ignore[valid-type]
+    """Per-key quota from ORG_ACL_JSON (rate_limit). None = server default applies.
+
+    Best-effort: any failure falls back to the default limiter, never blocks.
+    """
+    try:
+        from cloud.app.identity import acl_configured, resolve_identity
+
+        if not acl_configured():
+            return None
+        raw = request.headers.get("x-api-key")
+        authz = request.headers.get("authorization")
+        key = raw.strip() if raw else None
+        if not key and authz and authz.lower().startswith("bearer "):
+            key = authz[7:].strip()
+        ident = resolve_identity(key)
+        if ident is None or not ident.rate_limit:
+            return None
+        with _LIMITERS_LOCK:
+            limiter = _LIMITERS.get(ident.hint)
+            if limiter is None or limiter.limit != ident.rate_limit:
+                limiter = RateLimiter(ident.rate_limit)
+                _LIMITERS[ident.hint] = limiter
+            return limiter
+    except Exception:
+        return None
 
 
 class RateLimiter:
