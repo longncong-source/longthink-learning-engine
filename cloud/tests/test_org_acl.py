@@ -222,7 +222,6 @@ def test_watch_manage_restricted(acl_client):
 
 def test_identity_defaults_and_admin_policy():
     from cloud.app.identity import Identity, _default_projects, _default_tools
-
     nv_projects = _default_projects("Nguyen Van A", "phong_tckt_chung", "nhan_vien")
     assert nv_projects == ("congty_chung", "phong_tckt_chung", "nv_nguyen_van_a")
     assert "memory.delete" not in _default_tools("phong_tckt_chung", "nhan_vien")
@@ -236,3 +235,173 @@ def test_identity_defaults_and_admin_policy():
     bgd = Identity(user="bgd", phong="bgd", role="bgd",
                    projects_allowed=("*",), tools_allowed=("*",), data_policy="cloud_allowed")
     assert bgd.effective_data_policy == "cloud_allowed"
+
+
+# ── P0 hardening: bypass routes closed in the security review ──
+
+def test_proxy_requires_auth(acl_client):
+    # No key at all -> 401 (was: unauthenticated drive-by to :4096/:3001).
+    assert acl_client.get("/code/").status_code == 401
+    assert acl_client.get("/odc/").status_code == 401
+    assert acl_client.get("/api/sessions").status_code == 401
+    # Wrong key -> 401.
+    assert acl_client.get("/code/", headers=_headers("nope")).status_code == 401
+    # Valid key via header or ?api_key= passes auth (502 = OpenCode down, not 401).
+    assert acl_client.get("/code/", headers=_headers(NV_KEY)).status_code != 401
+    assert acl_client.get(f"/code/?api_key={NV_KEY}").status_code != 401
+
+
+def test_code_config_hides_password(acl_client):
+    r = acl_client.get("/v1/code/config", headers=_headers(NV_KEY))
+    assert r.status_code == 200
+    body = r.json()
+    assert "password" not in body
+    assert "configured" in body
+
+
+def test_voice_ask_requires_scope_before_stt(acl_client, projects):
+    files = {"audio": ("mic.webm", b"dummy-audio-bytes", "audio/webm")}
+    # NV without project -> 403 from the scope gate (STT never runs).
+    r = acl_client.post("/v1/voice/ask", files=files, headers=_headers(NV_KEY))
+    assert r.status_code == 403
+    # NV with a foreign project -> 403.
+    r = acl_client.post("/v1/voice/ask", files=files,
+                        data={"project_id": projects["phong_tkcn_chung"]},
+                        headers=_headers(NV_KEY))
+    assert r.status_code == 403
+    # NV with allowed project passes the gate (STT backend missing -> 5xx, not 403).
+    r = acl_client.post("/v1/voice/ask", files=files,
+                        data={"project_id": projects["phong_tckt_chung"]},
+                        headers=_headers(NV_KEY))
+    assert r.status_code != 403, r.text
+
+
+def test_obsidian_sync_requires_scope(acl_client, projects):
+    note = "---\nsync_to_brain: true\n---\nGhi chep hop giao ban phong"
+    # NV without project -> 403.
+    r = acl_client.post("/v1/obsidian/sync",
+                        json={"file": "hop.md", "content": note},
+                        headers=_headers(NV_KEY))
+    assert r.status_code == 403
+    # NV into allowed project -> 201 indexed.
+    r = acl_client.post("/v1/obsidian/sync",
+                        json={"file": "hop.md", "content": note,
+                              "project_id": projects["phong_tckt_chung"]},
+                        headers=_headers(NV_KEY))
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "indexed"
+    # NV into foreign project -> 403.
+    r = acl_client.post("/v1/obsidian/sync",
+                        json={"file": "hop.md", "content": note,
+                              "project_id": projects["phong_tkcn_chung"]},
+                        headers=_headers(NV_KEY))
+    assert r.status_code == 403
+    # vault-sync walks server paths -> watch.manage only (NV denied).
+    r = acl_client.post("/v1/obsidian/vault-sync",
+                        json={"vault_path": ".",
+                              "project_id": projects["phong_tckt_chung"]},
+                        headers=_headers(NV_KEY))
+    assert r.status_code == 403
+
+
+def test_memory_import_requires_scope(acl_client, projects):
+    import json as _json
+
+    payload = _json.dumps([{"title": "imp", "content": "noi dung import thu nghiem"}])
+    files = {"file": ("notes.json", payload.encode(), "application/json")}
+    # NV without project -> 403.
+    r = acl_client.post("/v1/memory/import", files=files, headers=_headers(NV_KEY))
+    assert r.status_code == 403
+    # NV into foreign project -> 403.
+    r = acl_client.post("/v1/memory/import", files=files,
+                        data={"project_id": projects["phong_tkcn_chung"]},
+                        headers=_headers(NV_KEY))
+    assert r.status_code == 403
+    # NV into allowed project -> 201.
+    r = acl_client.post("/v1/memory/import", files=files,
+                        data={"project_id": projects["phong_tckt_chung"]},
+                        headers=_headers(NV_KEY))
+    assert r.status_code == 201, r.text
+    assert r.json()["created"] >= 1
+
+
+def test_graph_post_filters_scope(acl_client, projects):
+    bgd_h = _headers(BGD_KEY)
+    acl_client.post("/v1/memory",
+                    json={"title": "g-tckt", "content": "graph scope tckt proof",
+                          "project_id": projects["phong_tckt_chung"]}, headers=bgd_h)
+    acl_client.post("/v1/memory",
+                    json={"title": "g-tkcn", "content": "graph scope tkcn proof",
+                          "project_id": projects["phong_tkcn_chung"]}, headers=bgd_h)
+    # Unscoped graph as NV: only allowed projects/memories leak through.
+    r = acl_client.get("/v1/graph?max_memories=100", headers=_headers(NV_KEY))
+    assert r.status_code == 200, r.text
+    labels = {n.get("label") for n in r.json()["nodes"]}
+    assert "phong_tkcn_chung" not in labels
+    assert not any(isinstance(n.get("label"), str) and "g-tkcn" in n["label"]
+                   for n in r.json()["nodes"])
+    # Scoped to a foreign project -> 403.
+    r = acl_client.get(f"/v1/graph?project_id={projects['phong_tkcn_chung']}",
+                       headers=_headers(NV_KEY))
+    assert r.status_code == 403
+    # Scoped to own project -> 200.
+    r = acl_client.get(f"/v1/graph?project_id={projects['phong_tckt_chung']}",
+                       headers=_headers(NV_KEY))
+    assert r.status_code == 200
+
+
+def test_admin_endpoints_gated(acl_client):
+    nv_h = _headers(NV_KEY)
+    assert acl_client.get("/v1/admin/audit", headers=nv_h).status_code == 403
+    assert acl_client.get("/v1/admin/metrics", headers=nv_h).status_code == 403
+    assert acl_client.get("/v1/admin/metrics", headers=_headers(BGD_KEY)).status_code == 200
+
+
+def test_lmstudio_switch_gated(acl_client, monkeypatch):
+    assert acl_client.post("/v1/lmstudio/switch?provider=auto",
+                           headers=_headers(NV_KEY)).status_code == 403
+
+    class _FakeProc:
+        stdout = "switched"
+        returncode = 0
+
+    import subprocess as _subprocess
+
+    monkeypatch.setattr(_subprocess, "run", lambda *a, **k: _FakeProc())
+    # BGD passes the gate (subprocess stubbed, no side effects).
+    r = acl_client.post("/v1/lmstudio/switch?provider=auto", headers=_headers(BGD_KEY))
+    assert r.status_code == 200, r.text
+
+
+def test_stats_scope_checked(acl_client, projects):
+    nv_h = _headers(NV_KEY)
+    # Unscoped stats are BGD-only (even counts stay inside a scope).
+    assert acl_client.get("/v1/mid-brain/knowledge/stats", headers=nv_h).status_code == 403
+    # Own scope allowed; forged/foreign scope denied.
+    assert acl_client.get(
+        f"/v1/mid-brain/knowledge/stats?project_id={projects['phong_tckt_chung']}",
+        headers=nv_h).status_code == 200
+    assert acl_client.get("/v1/mid-brain/knowledge/stats?project_id=00000000-0000-0000-0000-000000000000",
+                          headers=nv_h).status_code == 403
+    assert acl_client.get(f"/v1/mid-brain/learning/stats?project_id={projects['phong_tkcn_chung']}",
+                          headers=nv_h).status_code == 403
+
+
+def test_execute_cross_scope_denied(acl_client, projects):
+    tp_h, bgd_h = _headers(TP_KEY), _headers(BGD_KEY)
+    # BGD builds a plan inside TKCN scope; TCKT truong_phong must not run it.
+    r = acl_client.post("/v1/mid-brain/plan",
+                        json={"goal": "research thiet ke lo hoi",
+                              "project_id": projects["phong_tkcn_chung"]}, headers=bgd_h)
+    assert r.status_code == 200, r.text
+    plan_id = r.json()["plan_id"]
+    assert acl_client.post("/v1/mid-brain/execute", json={"plan_id": plan_id},
+                           headers=tp_h).status_code == 403
+    # Same-scope execution stays allowed.
+    r = acl_client.post("/v1/mid-brain/plan",
+                        json={"goal": "research quyet toan",
+                              "project_id": projects["phong_tckt_chung"]}, headers=tp_h)
+    assert r.status_code == 200, r.text
+    r = acl_client.post("/v1/mid-brain/execute",
+                        json={"plan_id": r.json()["plan_id"]}, headers=tp_h)
+    assert r.status_code == 200, r.text

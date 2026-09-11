@@ -1805,7 +1805,7 @@ async function fillCodePass(){
   try{
     const cfg = await api("/v1/code/config");
     const els = ["#code-pass-mini","#code-pass-tab"];
-    els.forEach(id=>{ const el=document.querySelector(id); if(el&&cfg.password) el.textContent=cfg.password; });
+    els.forEach(id=>{ const el=document.querySelector(id); if(el) el.textContent=cfg.configured?"•••••• (server-side)":"(chưa đặt)"; });
   }catch{}
 }
 setTimeout(fillCodePass, 800);

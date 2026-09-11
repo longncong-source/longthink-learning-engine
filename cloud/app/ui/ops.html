@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LongThink — Trung tâm vận hành</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='90'%3E🛠️%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/ui/styles.css" />
+<style>
+  .ops-layout { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .ops-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 16px; }
+  .ops-tabs button { cursor: pointer; }
+  .ops-tabs button.active { outline: 2px solid currentColor; }
+  .ops-panel { display: none; }
+  .ops-panel.active { display: block; }
+  .ops-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .ops-card { border: 1px solid #ccc; border-radius: 8px; padding: 12px; }
+  .ops-card h3 { margin: 0 0 6px; font-size: 14px; opacity: .75; }
+  .ops-card .big { font-size: 20px; font-weight: 700; }
+  .ok { color: #1a7f37; } .bad { color: #b42318; } .warn { color: #9a6700; }
+  table.ops-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.ops-table th, table.ops-table td { border-bottom: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
+  table.ops-table th { opacity: .7; }
+  .ops-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
+  .ops-row input[type=text], .ops-row input[type=number], .ops-row input:not([type]) { flex: 1; min-width: 200px; }
+  pre.ops-pre { background: #111; color: #ddd; padding: 12px; border-radius: 8px; max-height: 50vh; overflow: auto; font-size: 12px; }
+  .ops-result { margin-top: 10px; }
+  .ops-answer { white-space: pre-wrap; border-left: 3px solid #888; padding-left: 10px; margin: 8px 0; }
+  .muted { opacity: .65; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div id="key-modal" class="modal-backdrop hidden">
+  <div class="modal">
+    <h2>🔐 Kết nối Second Brain API</h2>
+    <p>Nhập API key (<code>X-API-Key</code>). Key chỉ lưu trong <b>sessionStorage</b> (mất khi đóng tab).</p>
+    <input id="key-input" type="password" placeholder="dev-local-key" autocomplete="off" spellcheck="false" />
+    <div class="modal-actions">
+      <button id="key-save" class="btn primary">Kết nối</button>
+    </div>
+    <p id="key-error" class="error-text hidden">Sai API key hoặc API chưa chạy.</p>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-icon">🛠️</span>
+    <div>
+      <div class="brand-title">LongThink — Trung tâm vận hành</div>
+      <div class="brand-sub">Dành cho Admin IT / BGĐ · key quyền cao · chỉ dùng trong mạng nội bộ</div>
+    </div>
+  </div>
+  <div class="status-pills">
+    <div class="pill" id="pill-api"><span class="dot gray"></span><span>API…</span></div>
+    <button class="btn ghost small" id="btn-key">🔑 Đổi key</button>
+    <a class="btn ghost small" href="/ui/" style="text-decoration:none">🧠 Tri thức</a>
+  </div>
+</header>
+
+<main class="ops-layout">
+  <nav class="ops-tabs" id="ops-tabs">
+    <button class="btn ghost small active" data-tab="health">Sức khỏe</button>
+    <button class="btn ghost small" data-tab="projects">Dự án</button>
+    <button class="btn ghost small" data-tab="search">Tìm kiếm</button>
+    <button class="btn ghost small" data-tab="ask">Hỏi Mid Brain</button>
+    <button class="btn ghost small" data-tab="approvals">Duyệt việc <span id="appr-count"></span></button>
+    <button class="btn ghost small" data-tab="audit">Audit</button>
+    <button class="btn ghost small" data-tab="metrics">Metrics</button>
+  </nav>
+
+  <section class="ops-panel active" id="tab-health">
+    <div class="ops-row">
+      <button class="btn primary small" id="btn-health">⟳ Tải trạng thái</button>
+      <span class="muted">GET /health · /health/details · /v1/mid-brain/health · /v1/mid-brain/status</span>
+    </div>
+    <div class="ops-cards" id="health-cards"></div>
+    <div class="ops-result" id="health-out"></div>
+  </section>
+
+  <section class="ops-panel" id="tab-projects">
+    <div class="ops-row">
+      <button class="btn primary small" id="btn-projects">⟳ Tải dự án</button>
+      <span class="muted">GET /v1/projects — server tự lọc theo scope của key</span>
+    </div>
+    <div class="ops-result" id="projects-out"></div>
+  </section>
+
+  <section class="ops-panel" id="tab-search">
+    <div class="ops-row">
+      <input id="search-q" placeholder="Câu truy vấn… (vd: quyet toan q3)" spellcheck="false" />
+      <input id="search-k" type="number" value="5" min="1" max="20" style="max-width:70px" title="top_k" />
+      <input id="search-pid" placeholder="project_id (để trống = toàn scope)" spellcheck="false" />
+      <button class="btn primary small" id="btn-search">Tìm</button>
+    </div>
+    <div class="ops-result" id="search-out"></div>
+  </section>
+
+  <section class="ops-panel" id="tab-ask">
+    <div class="ops-row">
+      <input id="ask-q" placeholder="Câu hỏi cho Mid Brain…" spellcheck="false" />
+      <input id="ask-pid" placeholder="project_id (bắt buộc với key nhân viên)" spellcheck="false" />
+      <button class="btn primary small" id="btn-ask">Hỏi</button>
+    </div>
+    <div class="ops-result" id="ask-out"></div>
+  </section>
+
+  <section class="ops-panel" id="tab-approvals">
+    <div class="ops-row">
+      <button class="btn primary small" id="btn-approvals">⟳ Tải hàng đợi</button>
+      <span class="muted">Việc high-risk/critical chỉ chạy sau khi duyệt — hỏi trước khi chạy</span>
+    </div>
+    <div class="ops-result" id="approvals-out"></div>
+  </section>
+
+  <section class="ops-panel" id="tab-audit">
+    <div class="ops-row">
+      <button class="btn primary small" id="btn-audit">⟳ Tải audit</button>
+      <input id="audit-limit" type="number" value="50" min="1" max="500" style="max-width:80px" title="limit" />
+      <span class="muted">GET /v1/admin/audit — cần key có quyền admin.audit</span>
+    </div>
+    <div class="ops-result" id="audit-out"></div>
+  </section>
+
+  <section class="ops-panel" id="tab-metrics">
+    <div class="ops-row">
+      <button class="btn primary small" id="btn-metrics">⟳ Tải metrics</button>
+      <span class="muted">GET /v1/admin/metrics (Prometheus)</span>
+    </div>
+    <div class="ops-result" id="metrics-out"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const API = "";
+const key = {
+  get: () => sessionStorage.getItem("lt_api_key") || "",
+  set: (v) => sessionStorage.setItem("lt_api_key", v),
+  clear: () => sessionStorage.removeItem("lt_api_key"),
+};
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => (
+    {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function call(path, opts) {
+  const k = key.get();
+  const res = await fetch(API + path, Object.assign(
+    {headers: {"X-API-Key": k, "Content-Type": "application/json"}}, opts || {}));
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { data = {raw: text}; }
+  if (!res.ok) {
+    const err = (data && data.error) || {};
+    throw new Error("HTTP " + res.status + " · " + (err.code || "error") + " · " + (err.message || text.slice(0, 200)));
+  }
+  return data;
+}
+
+function setPill(ok, label) {
+  $("pill-api").innerHTML = '<span class="dot ' + (ok ? "green" : "red") + '"></span><span>' + esc(label) + "</span>";
+}
+
+// ── key modal ──
+async function ensureKey() {
+  if (key.get()) return true;
+  $("key-modal").classList.remove("hidden");
+  $("key-error").classList.add("hidden");
+  return false;
+}
+$("key-save").addEventListener("click", async () => {
+  const v = $("key-input").value.trim();
+  if (!v) return;
+  const res = await fetch(API + "/health/details", {headers: {"X-API-Key": v}});
+  if (!res.ok) { $("key-error").classList.remove("hidden"); return; }
+  key.set(v);
+  $("key-input").value = "";
+  $("key-modal").classList.add("hidden");
+  setPill(true, "API ok");
+  loadHealth();
+});
+$("btn-key").addEventListener("click", () => {
+  key.clear();
+  setPill(false, "chưa có key");
+  ensureKey();
+});
+
+// ── tabs ──
+$("ops-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-tab]");
+  if (!b) return;
+  document.querySelectorAll("#ops-tabs button").forEach((x) => x.classList.remove("active"));
+  document.querySelectorAll(".ops-panel").forEach((x) => x.classList.remove("active"));
+  b.classList.add("active");
+  $("tab-" + b.dataset.tab).classList.add("active");
+});
+
+// ── health ──
+function card(title, big, cls) {
+  return '<div class="ops-card"><h3>' + esc(title) + '</h3><div class="big ' + (cls || "") + '">' + big + "</div></div>";
+}
+async function loadHealth() {
+  if (!await ensureKey()) return;
+  const out = $("health-out"), cards = $("health-cards");
+  out.innerHTML = '<span class="muted">Đang tải…</span>';
+  try {
+    const [h, d, mh, ms] = await Promise.all([
+      call("/health"),
+      call("/health/details"),
+      call("/v1/mid-brain/health"),
+      call("/v1/mid-brain/status"),
+    ]);
+    const st = d.storage || {}, em = d.embeddings || {};
+    const okAll = (d.status === "ok") && st.reachable && (mh.status === "healthy");
+    setPill(okAll, okAll ? "API ok" : "API degraded");
+    cards.innerHTML =
+      card("Trạng thái", esc(d.status || "?"), d.status === "ok" ? "ok" : "bad") +
+      card("Storage", esc((st.backend || "?") + (st.reachable ? " · reachable" : " · DOWN")), st.reachable ? "ok" : "bad") +
+      card("Memories", esc(String((st.counts && st.counts.memories) || 0))) +
+      card("Projects", esc(String((st.counts && st.counts.projects) || 0))) +
+      card("Documents", esc(String((st.counts && st.counts.documents) || 0))) +
+      card("Embeddings", esc((em.provider || "?") + " · dim " + (em.dimension || "?"))) +
+      card("Mid Brain", esc(mh.status || "?"), mh.status === "healthy" ? "ok" : "warn") +
+      card("Mid uptime", esc(Math.round(ms.uptime_seconds || 0) + "s"));
+    out.innerHTML = '<span class="muted">Cập nhật: ' + esc(d.time || "") + " · env " + esc(d.environment || "") + "</span>";
+  } catch (e) {
+    setPill(false, "lỗi");
+    out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>";
+  }
+}
+$("btn-health").addEventListener("click", loadHealth);
+
+// ── projects ──
+$("btn-projects").addEventListener("click", async () => {
+  if (!await ensureKey()) return;
+  const out = $("projects-out");
+  out.innerHTML = '<span class="muted">Đang tải…</span>';
+  try {
+    const list = await call("/v1/projects?limit=100");
+    if (!list.length) { out.innerHTML = '<span class="muted">Không có dự án nào trong scope của key.</span>'; return; }
+    out.innerHTML = '<table class="ops-table"><tr><th>Tên</th><th>Mô tả</th><th>Trạng thái</th><th>ID</th></tr>' +
+      list.map((p) => "<tr><td><b>" + esc(p.name) + "</b></td><td>" + esc(p.description || "") +
+        "</td><td>" + esc(p.status || "") + "</td><td class='muted'>" + esc(String(p.id).slice(0, 8)) + "…</td></tr>").join("") +
+      "</table>";
+  } catch (e) { out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>"; }
+});
+
+// ── search ──
+$("btn-search").addEventListener("click", async () => {
+  if (!await ensureKey()) return;
+  const out = $("search-out");
+  const q = $("search-q").value.trim();
+  if (!q) return;
+  out.innerHTML = '<span class="muted">Đang tìm…</span>';
+  try {
+    const body = {query: q, top_k: parseInt($("search-k").value, 10) || 5};
+    const pid = $("search-pid").value.trim();
+    if (pid) body.project_id = pid;
+    const r = await call("/v1/memory/search", {method: "POST", body: JSON.stringify(body)});
+    const res = r.results || [];
+    out.innerHTML = "<div class='muted'>Tổng: " + r.total + "</div>" + (res.length ? res.map((m) =>
+      "<div class='ops-answer'><b>" + esc(m.title || "(không tiêu đề)") + "</b> " +
+      "<span class='muted'>[" + esc(m.type) + " · score " + Number(m.score || 0).toFixed(3) + "]</span><br/>" +
+      esc((m.content || m.summary || "").slice(0, 400)) + "</div>").join("")
+      : '<span class="muted">Không có kết quả trong scope.</span>');
+  } catch (e) { out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>"; }
+});
+
+// ── ask mid brain ──
+$("btn-ask").addEventListener("click", async () => {
+  if (!await ensureKey()) return;
+  const out = $("ask-out");
+  const q = $("ask-q").value.trim();
+  if (!q) return;
+  out.innerHTML = '<span class="muted">Mid Brain đang suy nghĩ (14 bước)…</span>';
+  try {
+    const body = {question: q};
+    const pid = $("ask-pid").value.trim();
+    if (pid) body.project_id = pid;
+    const r = await call("/v1/mid-brain/process", {method: "POST", body: JSON.stringify(body)});
+    out.innerHTML = "<div class='ops-answer'>" + esc(r.answer) + "</div>" +
+      "<div class='muted'>confidence " + Number(r.confidence || 0).toFixed(3) +
+      " · memories " + (r.memories_used || 0) + " · knowledge " + (r.knowledge_used || 0) +
+      " · conflicts " + (r.conflicts_detected || 0) +
+      " · trace <code>" + esc(r.trace_id || "") + "</code> " +
+      "<button class='btn ghost small' data-trace='" + esc(r.trace_id || "") + "'>Xem trace</button></div>" +
+      "<div id='trace-out'></div>";
+    const tb = out.querySelector("[data-trace]");
+    if (tb && r.trace_id) tb.addEventListener("click", () => loadTrace(r.trace_id));
+  } catch (e) { out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>"; }
+});
+async function loadTrace(traceId) {
+  const out = $("trace-out");
+  out.innerHTML = '<span class="muted">Đang tải trace…</span>';
+  try {
+    const r = await call("/v1/mid-brain/trace/" + encodeURIComponent(traceId) + "?days=7");
+    const evs = r.events || [];
+    out.innerHTML = "<div class='muted'>" + evs.length + " events:</div><pre class='ops-pre'>" +
+      esc(JSON.stringify(evs, null, 1).slice(0, 6000)) + "</pre>";
+  } catch (e) { out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>"; }
+}
+
+// ── approvals ──
+async function loadApprovals() {
+  if (!await ensureKey()) return;
+  const out = $("approvals-out");
+  out.innerHTML = '<span class="muted">Đang tải…</span>';
+  try {
+    const r = await call("/v1/mid-brain/approvals/pending");
+    const list = r.pending || [];
+    $("appr-count").textContent = list.length ? "(" + list.length + ")" : "";
+    if (!list.length) { out.innerHTML = '<span class="muted">Không có việc nào chờ duyệt.</span>'; return; }
+    out.innerHTML = list.map((a) => {
+      const t = a.task || {};
+      return "<div class='ops-card' style='margin-bottom:10px'><h3>" + esc(a.approval_id) + "</h3>" +
+        "<div><b>" + esc(t.objective || t.description || "(không mô tả)") + "</b></div>" +
+        "<div class='muted'>risk " + esc(t.risk_level || "?") + " · lý do: " + esc(a.reason || "") +
+        " · " + esc(a.requested_at || "") + "</div>" +
+        "<div class='ops-row'><input placeholder='Lý do từ chối (khi bấm Từ chối)' data-reason='" + esc(a.approval_id) + "' />" +
+        "<button class='btn primary small' data-approve='" + esc(a.approval_id) + "'>Duyệt</button>" +
+        "<button class='btn ghost small' data-reject='" + esc(a.approval_id) + "'>Từ chối</button></div></div>";
+    }).join("");
+    out.querySelectorAll("[data-approve]").forEach((b) => b.addEventListener("click", () => decide(b.dataset.approve, true)));
+    out.querySelectorAll("[data-reject]").forEach((b) => b.addEventListener("click", () => decide(b.dataset.reject, false)));
+  } catch (e) { out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>"; }
+}
+async function decide(approvalId, approve) {
+  const reasonEl = document.querySelector("[data-reason='" + approvalId + "']");
+  const reason = reasonEl ? reasonEl.value : "";
+  try {
+    await call("/v1/mid-brain/approvals/" + encodeURIComponent(approvalId),
+      {method: "POST", body: JSON.stringify({approve: approve, reason: reason})});
+    loadApprovals();
+  } catch (e) { alert(e.message); }
+}
+$("btn-approvals").addEventListener("click", loadApprovals);
+
+// ── audit ──
+$("btn-audit").addEventListener("click", async () => {
+  if (!await ensureKey()) return;
+  const out = $("audit-out");
+  out.innerHTML = '<span class="muted">Đang tải…</span>';
+  try {
+    const lim = parseInt($("audit-limit").value, 10) || 50;
+    const r = await call("/v1/admin/audit?limit=" + lim);
+    const evs = r.events || [];
+    out.innerHTML = '<table class="ops-table"><tr><th>Thời gian</th><th>Loại</th><th>Method</th><th>Path</th><th>Status</th><th>Actor</th><th>Key</th><th>ms</th></tr>' +
+      evs.map((e) => {
+        const det = e.detail || {};
+        const actor = det.actor ? det.actor + " (" + (det.phong || "") + "/" + (det.role || "") + ")" : "—";
+        const st = e.status >= 500 ? "bad" : (e.status >= 400 ? "warn" : "ok");
+        return "<tr><td class='muted'>" + esc((e.ts || "").slice(11, 19)) + "</td><td>" + esc(e.kind || "") +
+          "</td><td>" + esc(e.method || "") + "</td><td>" + esc(e.path || "") + "</td>" +
+          "<td class='" + st + "'>" + esc(String(e.status == null ? "" : e.status)) + "</td>" +
+          "<td>" + esc(actor) + "</td><td class='muted'>" + esc(e.api_key_hint || "") + "</td>" +
+          "<td class='muted'>" + esc(String(e.duration_ms == null ? "" : e.duration_ms)) + "</td></tr>";
+      }).join("") + "</table>";
+  } catch (e) { out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>"; }
+});
+
+// ── metrics ──
+$("btn-metrics").addEventListener("click", async () => {
+  if (!await ensureKey()) return;
+  const out = $("metrics-out");
+  out.innerHTML = '<span class="muted">Đang tải…</span>';
+  try {
+    const res = await fetch(API + "/v1/admin/metrics", {headers: {"X-API-Key": key.get()}});
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    out.innerHTML = "<pre class='ops-pre'>" + esc(await res.text()) + "</pre>";
+  } catch (e) { out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>"; }
+});
+
+// ── init ──
+if (!key.get()) { ensureKey(); setPill(false, "chưa có key"); }
+else { setPill(true, "API ok"); loadHealth(); }
+</script>
+</body>
+</html>

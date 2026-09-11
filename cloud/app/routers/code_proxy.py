@@ -18,8 +18,11 @@ def _auth():
     return (u, p) if p else None
 
 async def proxy_request(request: Request, path: str = ""):
-    # Build target URL
-    qs = f"?{request.url.query}" if request.url.query else ""
+    # Build target URL (never forward the ?api_key= credential upstream)
+    from urllib.parse import parse_qsl, urlencode
+
+    qs_pairs = [(k, v) for k, v in parse_qsl(request.url.query, keep_blank_values=True) if k != "api_key"]
+    qs = f"?{urlencode(qs_pairs)}" if qs_pairs else ""
     target = f"{CODE_URL.rstrip('/')}/{path.lstrip('/')}{qs}" if path else f"{CODE_URL.rstrip('/')}/{qs.lstrip('?')}"
     if not path and not request.url.query:
         target = f"{CODE_URL.rstrip('/')}/"

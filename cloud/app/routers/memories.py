@@ -122,11 +122,19 @@ def import_memories_endpoint(
     project_id: UUID | None = Form(default=None),
     default_type: MemoryType = Form(default=MemoryType.semantic),
     source: str | None = Form(default=None, max_length=500),
-    _api_key: str = Depends(require_api_key),
+    identity: Identity | None = Depends(require_identity),
 ) -> MemoryImportResponse:
     """Bulk-convert a file (json/jsonl/csv/md/txt) into memories for agent consumption."""
+    _deny_tool(identity, "memory.write")
+    repo = get_repository()
+    pid = str(project_id) if project_id else None
+    _deny_project(identity, pid, repo)
+    if identity is not None and pid:
+        # Same rule as single writes: never bulk-import into someone's nv_*.
+        if is_foreign_personal(identity, check_project_id(identity, pid, repo)):
+            raise ForbiddenError("Cannot write into another person's personal project")
     if project_id:
-        if get_repository().get_project(str(project_id)) is None:
+        if repo.get_project(str(project_id)) is None:
             raise NotFoundError(f"Project {project_id} does not exist")
 
     data = file.file.read()

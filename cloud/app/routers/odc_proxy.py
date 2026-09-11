@@ -10,7 +10,10 @@ HOP_BY_HOP = {"connection","keep-alive","proxy-authenticate","proxy-authorizatio
 BLOCKED = {"x-frame-options","content-security-policy","content-security-policy-report-only"}
 
 async def proxy_request(request: Request, path: str = ""):
-    qs = f"?{request.url.query}" if request.url.query else ""
+    from urllib.parse import parse_qsl, urlencode
+
+    qs_pairs = [(k, v) for k, v in parse_qsl(request.url.query, keep_blank_values=True) if k != "api_key"]
+    qs = f"?{urlencode(qs_pairs)}" if qs_pairs else ""
     target = f"{ODC_URL.rstrip('/')}/{path.lstrip('/')}{qs}" if path else f"{ODC_URL.rstrip('/')}/{qs.lstrip('?')}"
     if not path and not request.url.query:
         target = f"{ODC_URL.rstrip('/')}/"

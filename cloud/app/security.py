@@ -7,7 +7,7 @@ import threading
 import time
 from collections import defaultdict, deque
 
-from fastapi import Header, Request
+from fastapi import Header, Query, Request
 
 from typing import TYPE_CHECKING
 
@@ -68,6 +68,30 @@ def require_identity(
             "API key has no org identity (missing from ORG_ACL_JSON) - contact Admin",
         )
     return identity
+
+
+def require_proxy_auth(
+    request: Request,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    authorization: str | None = Header(default=None),
+    api_key_qs: str | None = Query(default=None, alias="api_key"),
+) -> str:
+    """Auth for the /code /api /assets /odc reverse proxies (RCE-adjacent).
+
+    Browsers/iframes cannot send X-API-Key headers, so a key may also arrive
+    as ``?api_key=`` query param (path-only is audit-logged, never the query).
+    Either way the key must be a configured MEMORY_API_KEYS entry.
+    """
+    supplied = _extract_supplied_key(x_api_key, authorization) or (api_key_qs or "").strip() or None
+    configured = get_settings().api_key_list
+    if not configured:
+        raise AuthenticationError("Server has no API keys configured (MEMORY_API_KEYS empty)")
+    if not supplied:
+        raise AuthenticationError("Missing API key (send X-API-Key header, Bearer token, or ?api_key=)")
+    for key in configured:
+        if hmac.compare_digest(key, supplied):
+            return supplied
+    raise AuthenticationError("Invalid API key")
 
 
 _LIMITERS_LOCK = threading.Lock()

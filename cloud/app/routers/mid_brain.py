@@ -286,6 +286,13 @@ async def execute_plan(
     if plan is None:
         raise NotFoundError(f"Plan {request.plan_id} not found")
     if identity is not None and not identity.is_bgd:
+        # A plan created in another phong's scope cannot be executed here.
+        plan_ctx = (getattr(plan, "metadata", None) or {}).get("context") or {}
+        plan_project = plan_ctx.get("project_id")
+        if plan_project:
+            _deny_project_scope(identity, str(plan_project))
+        elif not identity.is_bgd:
+            raise ForbiddenError("Unscoped plans are BGD-only")
         for task in plan.tasks:
             task_tools = set(task.tools_allowed or [])
             if task_tools & _CODE_TASK_TOOLS and not tool_allowed(identity, "code.execute"):
@@ -398,9 +405,10 @@ async def get_trace(
 @router.get("/memory/stats")
 async def memory_stats(
     project_id: str | None = Query(None, description="Filter by project"),
-    _: str = Depends(verify_api_key),
+    identity: Identity | None = Depends(require_identity),
 ):
     """Get Mid Brain memory statistics."""
+    _deny_project_scope(identity, project_id)
     brain = get_mid_brain()
     stats = brain.memory.get_stats()
     if project_id:
@@ -411,9 +419,10 @@ async def memory_stats(
 @router.get("/knowledge/stats")
 async def knowledge_stats(
     project_id: str | None = Query(None, description="Filter by project"),
-    _: str = Depends(verify_api_key),
+    identity: Identity | None = Depends(require_identity),
 ):
-    """Get Mid Brain knowledge statistics."""
+    """Get Mid Brain knowledge statistics (counts only, never content)."""
+    _deny_project_scope(identity, project_id)
     brain = get_mid_brain()
     # KnowledgeManager has search/get_trusted_knowledge, no get_stats — synthesize
     try:
@@ -427,9 +436,10 @@ async def knowledge_stats(
 @router.get("/learning/stats")
 async def learning_stats(
     project_id: str | None = Query(None, description="Filter by project"),
-    _: str = Depends(verify_api_key),
+    identity: Identity | None = Depends(require_identity),
 ):
-    """Get Mid Brain learning statistics."""
+    """Get Mid Brain learning statistics (counts only, never content)."""
+    _deny_project_scope(identity, project_id)
     brain = get_mid_brain()
     try:
         # LearningEngine: get_lessons / get_decisions / search_learning

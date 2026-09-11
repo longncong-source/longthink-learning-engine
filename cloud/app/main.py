@@ -9,7 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,7 +23,7 @@ from cloud.app.db import get_repository, reset_repository
 from cloud.app.errors import DomainError, RateLimitError
 from cloud.app.routers import admin, code, comfy, documents, graph, health, lmstudio, memories, mid_brain, obsidian, odc, projects, voice
 from cloud.app.routers import code_proxy, odc_proxy
-from cloud.app.security import RateLimiter, client_identity, custom_limiter_for_request
+from cloud.app.security import RateLimiter, client_identity, custom_limiter_for_request, require_proxy_auth
 from cloud.app.services import audit_service
 
 logger = logging.getLogger("fsb")
@@ -219,26 +219,34 @@ def create_app() -> FastAPI:
     app.include_router(odc.router)
     app.include_router(voice.router)
     # Proxy OpenCode Web :4096 -> :8100/code/*  (auth handled server-side, no login popup in iframe)
-    @app.api_route("/code/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+    # NOTE: proxies can drive local code execution -> require a valid API key
+    # (header/Bearer, or ?api_key= for browser/iframe use).
+    @app.api_route("/code/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+                   dependencies=[Depends(require_proxy_auth)])
     async def _code_proxy(request: Request, path: str):
         return await code_proxy.proxy_request(request, path)
-    @app.api_route("/code", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+    @app.api_route("/code", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+                   dependencies=[Depends(require_proxy_auth)])
     async def _code_proxy_root(request: Request):
         return await code_proxy.proxy_request(request, "")
     # Fallback for absolute URLs in proxied HTML (e.g. /api, /assets, /favicon) — also proxy to 4096
-    @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+    @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+                   dependencies=[Depends(require_proxy_auth)])
     async def _api_proxy(request: Request, path: str):
         # Only proxy if this looks like OpenCode (avoid shadowing LongThink /v1/api)
         # LongThink uses /v1/*, so /api/* is safe to proxy
         return await code_proxy.proxy_request(request, f"api/{path}")
-    @app.api_route("/assets/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+    @app.api_route("/assets/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+                   dependencies=[Depends(require_proxy_auth)])
     async def _assets_proxy(request: Request, path: str):
         return await code_proxy.proxy_request(request, f"assets/{path}")
     # Proxy ODC Studio :3001 -> :8100/odc/* (visual orchestration RETRIEVE->THINK->STORE)
-    @app.api_route("/odc/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+    @app.api_route("/odc/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+                   dependencies=[Depends(require_proxy_auth)])
     async def _odc_proxy(request: Request, path: str):
         return await odc_proxy.proxy_request(request, path)
-    @app.api_route("/odc", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+    @app.api_route("/odc", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+                   dependencies=[Depends(require_proxy_auth)])
     async def _odc_proxy_root(request: Request):
         return await odc_proxy.proxy_request(request, "")
 

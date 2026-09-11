@@ -34,7 +34,7 @@ from cloud.app.identity import (
     is_foreign_personal,
     tool_allowed,
 )
-from cloud.app.security import require_api_key, require_identity
+from cloud.app.security import require_identity
 from cloud.app.services import watcher
 from cloud.app.services.document_service import (
     delete_document,
@@ -195,7 +195,8 @@ def register_watch(
 
 
 @router.get("/watch", response_model=WatchStatusResponse)
-def watch_status(_api_key: str = Depends(require_api_key)) -> WatchStatusResponse:
+def watch_status(identity: Identity | None = Depends(require_identity)) -> WatchStatusResponse:
+    # Folder paths are server-local: closed mode requires a provisioned identity.
     st = watcher.status()
     return WatchStatusResponse(
         running=st["running"],

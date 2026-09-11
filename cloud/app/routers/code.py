@@ -33,9 +33,11 @@ def code_health(_: None = Depends(require_api_key)):
 @router.get("/config")
 def code_config(_: None = Depends(require_api_key)):
     import os as _os
+    # NEVER expose the server password (was leaked to every key holder).
+    # The UI shows configured/not-configured; auth to :4096 stays server-side.
     return {
         "url": CODE_DEFAULT_URL,
         "username": _os.environ.get("OPENCODE_SERVER_USERNAME", "opencode"),
-        "password": _os.environ.get("OPENCODE_SERVER_PASSWORD", ""),
+        "configured": bool(_os.environ.get("OPENCODE_SERVER_PASSWORD", "")),
         "hint": "opencode web --port 4096 --hostname 127.0.0.1 — login Basic Auth",
     }

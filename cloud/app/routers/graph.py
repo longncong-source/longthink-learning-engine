@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import httpx
@@ -20,7 +20,12 @@ from fastapi import APIRouter, Depends
 
 from cloud.app.config import get_settings
 from cloud.app.db import get_repository
-from cloud.app.security import require_api_key
+from cloud.app.errors import ForbiddenError
+from cloud.app.identity import allowed_project_id_set, check_project_id
+from cloud.app.security import require_api_key, require_identity
+
+if TYPE_CHECKING:
+    from cloud.app.identity import Identity
 
 router = APIRouter(prefix="/v1/graph", tags=["graph"])
 
@@ -65,7 +70,11 @@ def _collect_memories(repo: Any, limit: int, project_id: str | None) -> tuple[li
     return collected[:limit], True
 
 
-def _build_graph(project_id: UUID | None, max_memories: int) -> dict[str, Any]:
+def _build_graph(
+    project_id: UUID | None,
+    max_memories: int,
+    allowed: set[str] | None = None,
+) -> dict[str, Any]:
     settings = get_settings()
     repo = get_repository(settings)
     project_filter = str(project_id) if project_id else None
@@ -73,8 +82,14 @@ def _build_graph(project_id: UUID | None, max_memories: int) -> dict[str, Any]:
     projects = repo.list_projects(limit=_PAGE_SIZE)
     if project_filter:
         projects = [p for p in projects if str(p.id) == project_filter]
+    elif allowed is not None:
+        # Unscoped view in closed mode: only projects inside the caller's scope.
+        projects = [p for p in projects if str(p.id) in allowed]
     documents = repo.list_documents(limit=_PAGE_SIZE, project_id=project_filter)
     memories, truncated = _collect_memories(repo, max(1, min(max_memories, _MAX_MEMORIES)), project_filter)
+    if allowed is not None and not project_filter:
+        documents = [d for d in documents if str(d.project_id) in allowed]
+        memories = [m for m in memories if str(m.project_id) in allowed]
 
     nodes: list[dict[str, Any]] = []
     links: list[dict[str, Any]] = []
@@ -154,9 +169,20 @@ def _build_graph(project_id: UUID | None, max_memories: int) -> dict[str, Any]:
 def knowledge_graph(
     max_memories: int = 800,
     project_id: UUID | None = None,
+    identity: Identity | None = Depends(require_identity),
 ) -> dict[str, Any]:
-    """Nodes + links of the knowledge graph for visualization clients."""
-    return _build_graph(project_id, max_memories)
+    """Nodes + links of the knowledge graph for visualization clients.
+
+    Closed mode: a scoped project_id is pre-checked; unscoped views are
+    post-filtered to the caller's allowed projects (never the whole graph).
+    """
+    repo = get_repository()
+    pid = str(project_id) if project_id else None
+    if identity is not None and pid:
+        if check_project_id(identity, pid, repo) is None:
+            raise ForbiddenError("Project not in your allowed scope")
+    allowed = allowed_project_id_set(identity, repo)
+    return _build_graph(project_id, max_memories, allowed)
 
 
 def _embedding_status() -> dict[str, Any]:

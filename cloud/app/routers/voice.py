@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import base64
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from cloud.app.config import get_settings
-from cloud.app.errors import PayloadTooLargeError
+from cloud.app.db import get_repository
+from cloud.app.errors import ForbiddenError, PayloadTooLargeError
+from cloud.app.identity import check_project_id
 from cloud.app.security import require_api_key as verify_api_key
+from cloud.app.security import require_identity
 from cloud.app.services import voice_service
+
+if TYPE_CHECKING:
+    from cloud.app.identity import Identity
 
 router = APIRouter(prefix="/v1/voice", tags=["Voice"])
 
@@ -65,11 +72,18 @@ async def voice_ask(
     audio: UploadFile = File(..., description="Mic recording (webm/wav/mp3)"),
     project_id: str | None = Form(None, description="Optional project UUID"),
     voice: str | None = Form(None, description="TTS voice, default vi-VN-HoaiMyNeural"),
-    _: str = Depends(verify_api_key),
+    identity: Identity | None = Depends(require_identity),
 ):
-    """Full voice turn: audio -> text -> LongThink answer -> spoken mp3 (base64)."""
+    """Full voice turn: audio -> text -> LongThink answer -> spoken mp3 (base64).
+
+    Scope is enforced BEFORE transcription: closed mode non-BGD must pass an
+    allowed project_id (voice answers quote stored content verbatim).
+    """
     raw = await audio.read()
     _check_size(raw)
+    if identity is not None and not identity.is_bgd:
+        if not project_id or check_project_id(identity, project_id, get_repository()) is None:
+            raise ForbiddenError("project_id in your allowed scope is required")
     settings = get_settings()
     question = voice_service.transcribe(raw, audio.filename or "mic.webm", settings)
     result = voice_service.answer_from_longthink(question, settings, project_id)
