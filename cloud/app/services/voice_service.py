@@ -114,6 +114,21 @@ def _transcribe_local(audio: bytes, filename: str, s: Settings) -> str:
     return text
 
 
+def _preseed_platform_system() -> None:
+    """Pin platform.system() before importing edge_tts (which pulls aiohttp).
+
+    aiohttp/helpers.py calls platform.system() at import time; on Windows that
+    goes through a WMI query (Win32_OperatingSystem) and hangs forever when the
+    WMI service is wedged. sys.platform already tells us the answer, so pin it
+    and skip WMI entirely. No-op when already patched or not on Windows.
+    """
+    import platform
+    import sys
+
+    if sys.platform == "win32" and getattr(platform.system, "__module__", "") == "platform":
+        platform.system = lambda: "Windows"  # noqa: E731 - value provably correct here
+
+
 async def synthesize(
     text: str, settings: Settings | None = None, voice: str | None = None
 ) -> tuple[bytes, str]:
@@ -122,6 +137,7 @@ async def synthesize(
     use_voice = voice or s.voice_tts_voice
     if use_voice not in VI_VOICES:
         use_voice = DEFAULT_VOICE
+    _preseed_platform_system()
     try:
         import edge_tts  # type: ignore[import-not-found]
     except ImportError as exc:

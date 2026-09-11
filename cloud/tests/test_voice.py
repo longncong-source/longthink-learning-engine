@@ -64,6 +64,21 @@ class TestVoiceServiceErrors:
         assert voice_service.transcribe(b"FAKEAUDIO", "mic.webm", s) == "xin chào LongThink"
         assert fake.calls and fake.calls[0]["language"] == s.voice_stt_language
 
+    def test_preseed_platform_skips_wmi(self, monkeypatch):  # type: ignore[no-untyped-def]
+        """aiohttp calls platform.system() at import (WMI on Windows); a wedged
+        WMI service hangs that forever. Preseed must pin the answer first."""
+        import platform
+
+        from cloud.app.services import voice_service
+
+        def _hung():  # type: ignore[no-untyped-def]
+            raise AssertionError("WMI must not be touched")
+
+        monkeypatch.setattr(platform, "system", _hung)
+        monkeypatch.setattr(platform.system, "__module__", "platform")
+        voice_service._preseed_platform_system()
+        assert platform.system() == "Windows"
+
     def test_transcribe_local_needs_package(self, monkeypatch):  # type: ignore[no-untyped-def]
         import sys
 
