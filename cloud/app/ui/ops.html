@@ -65,6 +65,7 @@
     <button class="btn ghost small" data-tab="search">Tìm kiếm</button>
     <button class="btn ghost small" data-tab="ask">Hỏi Mid Brain</button>
     <button class="btn ghost small" data-tab="approvals">Duyệt việc <span id="appr-count"></span></button>
+    <button class="btn ghost small" data-tab="assistants">Trợ lý</button>
     <button class="btn ghost small" data-tab="audit">Audit</button>
     <button class="btn ghost small" data-tab="metrics">Metrics</button>
   </nav>
@@ -111,6 +112,49 @@
       <span class="muted">Việc high-risk/critical chỉ chạy sau khi duyệt — hỏi trước khi chạy</span>
     </div>
     <div class="ops-result" id="approvals-out"></div>
+  </section>
+
+  <section class="ops-panel" id="tab-assistants">
+    <div class="ops-card" style="margin-bottom:12px">
+      <h3>Tạo trợ lý ảo cho nhân viên</h3>
+      <div class="muted">Mỗi người 1 key riêng, scope theo đúng chức năng/phạm vi việc. Key chỉ hiện <b>1 lần</b> — copy ngay cho nhân viên. Hiệu lực ngay, không cần restart.</div>
+      <div class="ops-row">
+        <input id="as-user" placeholder="Tên nhân viên (vd: nguyen_van_a)" spellcheck="false" />
+        <select id="as-phong" title="Phòng">
+          <option value="phong_tchc_chung">TCHC — Tổ chức Hành chính</option>
+          <option value="phong_tckt_chung">TCKT — Tài chính Kế toán</option>
+          <option value="phong_kthd_chung">KTHD — Kinh tế Hợp đồng</option>
+          <option value="phong_ptda_chung">PTDA — Phát triển Dự án</option>
+          <option value="phong_tkcn_chung">TKCN — Thiết kế Công nghệ</option>
+          <option value="phong_ktgs_chung">KTGS — Kỹ thuật Giám sát</option>
+          <option value="bgd">BGĐ — Ban Giám đốc</option>
+          <option value="admin">Admin — IT vận hành</option>
+        </select>
+        <select id="as-role" title="Vai trò">
+          <option value="nhan_vien">Nhân viên</option>
+          <option value="truong_phong">Trưởng phòng</option>
+          <option value="bgd">BGĐ</option>
+          <option value="admin">Admin IT</option>
+        </select>
+        <select id="as-policy" title="Chính sách dữ liệu">
+          <option value="selective">selective — gửi chọn lọc</option>
+          <option value="local_only">local_only — chỉ local</option>
+          <option value="cloud_allowed">cloud_allowed — cho phép cloud</option>
+        </select>
+      </div>
+      <div class="ops-row">
+        <input id="as-reports" placeholder="NV trực thuộc, cách nhau dấu phẩy (chỉ trưởng phòng)" spellcheck="false" />
+        <input id="as-rate" type="number" min="1" placeholder="Quota req/phút (trống = mặc định)" style="max-width:220px" />
+        <label class="muted"><input type="checkbox" id="as-project" checked /> tạo project nv_…</label>
+        <button class="btn primary small" id="btn-as-create">Tạo trợ lý</button>
+      </div>
+      <div class="ops-result" id="as-new"></div>
+    </div>
+    <div class="ops-row">
+      <button class="btn primary small" id="btn-as-list">⟳ Tải danh sách</button>
+      <span class="muted">GET /v1/admin/assistants — cần key Admin/BGĐ, closed-mode</span>
+    </div>
+    <div class="ops-result" id="as-out"></div>
   </section>
 
   <section class="ops-panel" id="tab-audit">
@@ -370,6 +414,77 @@ $("btn-metrics").addEventListener("click", async () => {
     const res = await fetch(API + "/v1/admin/metrics", {headers: {"X-API-Key": key.get()}});
     if (!res.ok) throw new Error("HTTP " + res.status);
     out.innerHTML = "<pre class='ops-pre'>" + esc(await res.text()) + "</pre>";
+  } catch (e) { out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>"; }
+});
+
+// ── assistants ──
+$("as-phong").addEventListener("change", () => {
+  const p = $("as-phong").value;
+  if (p === "bgd") $("as-role").value = "bgd";
+  else if (p === "admin") $("as-role").value = "admin";
+  else if ($("as-role").value === "bgd" || $("as-role").value === "admin") $("as-role").value = "nhan_vien";
+});
+async function loadAssistants() {
+  if (!await ensureKey()) return;
+  const out = $("as-out");
+  out.innerHTML = '<span class="muted">Đang tải…</span>';
+  try {
+    const r = await call("/v1/admin/assistants");
+    const list = r.assistants || [];
+    if (!list.length) { out.innerHTML = '<span class="muted">Chưa có trợ lý nào.</span>'; return; }
+    out.innerHTML = '<table class="ops-table"><tr><th>Nhân viên</th><th>Phòng</th><th>Vai</th><th>Policy</th>' +
+      "<th>Projects</th><th>Tools</th><th>Key hint</th><th></th></tr>" +
+      list.map((a) => "<tr><td><b>" + esc(a.user) + "</b></td><td>" + esc(a.phong) + "</td><td>" + esc(a.role) +
+        "</td><td>" + esc(a.data_policy || "") + "</td>" +
+        "<td class='muted'>" + (a.projects_allowed || []).length + " scope</td>" +
+        "<td class='muted'>" + esc((a.tools_allowed || []).join(", ").slice(0, 60)) + "</td>" +
+        "<td class='muted'>" + esc(a.key_hint || "") + "</td>" +
+        "<td><button class='btn ghost small' data-revoke='" + esc(a.user) + "'>Thu hồi</button></td></tr>").join("") +
+      "</table>";
+    out.querySelectorAll("[data-revoke]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Thu hồi key của '" + b.dataset.revoke + "'? Tri thức giữ lại, quyền truy cập chấm dứt.")) return;
+      try {
+        await call("/v1/admin/assistants/" + encodeURIComponent(b.dataset.revoke), {method: "DELETE"});
+        loadAssistants();
+      } catch (e) { alert(e.message); }
+    }));
+  } catch (e) {
+    out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>" +
+      (String(e.message).includes("closed-mode")
+        ? "<div class='muted'>Đang open-mode: chạy <code>scripts/seed_org.py --with-acl-skeleton</code> để lấy ORG_ACL_JSON mẫu, dán vào cloud/.env rồi restart API.</div>" : "");
+  }
+}
+$("btn-as-list").addEventListener("click", loadAssistants);
+$("btn-as-create").addEventListener("click", async () => {
+  if (!await ensureKey()) return;
+  const out = $("as-new");
+  const user = $("as-user").value.trim();
+  if (!user) { out.innerHTML = '<span class="bad">Nhập tên nhân viên.</span>'; return; }
+  const body = {
+    user: user,
+    phong: $("as-phong").value,
+    role: $("as-role").value,
+    data_policy: $("as-policy").value,
+    reports: $("as-reports").value.split(",").map((s) => s.trim()).filter(Boolean),
+    rate_limit: parseInt($("as-rate").value, 10) || null,
+    create_project: $("as-project").checked,
+  };
+  out.innerHTML = '<span class="muted">Đang tạo…</span>';
+  try {
+    const r = await call("/v1/admin/assistants", {method: "POST", body: JSON.stringify(body)});
+    out.innerHTML = "<div class='ops-card'><h3>✅ Đã tạo trợ lý <b>" + esc(r.user) + "</b> — hiệu lực ngay</h3>" +
+      "<div class='ops-row'><input id='as-key-once' readonly value='" + esc(r.api_key || "") + "' />" +
+      "<button class='btn primary small' id='as-copy'>Copy key</button></div>" +
+      "<div class='bad'>⚠️ Key chỉ hiện 1 lần — copy ngay cho nhân viên, tải lại trang là mất.</div>" +
+      "<div class='muted'>scope: " + (r.projects_allowed || []).length + " projects" +
+      (r.project_id ? " · project cá nhân đã tạo" : "") + "</div></div>";
+    $("as-copy").addEventListener("click", () => {
+      $("as-key-once").select();
+      document.execCommand("copy");
+      $("as-copy").textContent = "Đã copy ✓";
+    });
+    $("as-user").value = "";
+    loadAssistants();
   } catch (e) { out.innerHTML = '<span class="bad">' + esc(e.message) + "</span>"; }
 });
 

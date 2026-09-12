@@ -60,6 +60,7 @@ _ADMIN_TOOLS: tuple[str, ...] = (
     "admin.audit",
     "admin.metrics",
     "watch.manage",
+    "assistants.manage",
 )
 
 

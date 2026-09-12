@@ -1,0 +1,20 @@
+# LONGTHINK ORGANIZATION CORE — local deployment (Phase 12).
+# Standalone stack: own SQLite DB, port 8101. Does NOT touch the
+# Second/First/Mid Brain databases or the legacy docker-compose.yml.
+services:
+  org-core:
+    build:
+      context: ..
+      dockerfile: organization_core/Dockerfile
+    image: longthink-org-core:1.0.0
+    container_name: longthink-org-core
+    ports:
+      - "${ORGANIZATION_CORE_PORT:-8101}:8101"
+    env_file:
+      - organization_core/.env
+    volumes:
+      - org-core-data:/srv/data
+    restart: unless-stopped
+
+volumes:
+  org-core-data:
